@@ -3,8 +3,8 @@
 
 import { listen } from "@tauri-apps/api/event";
 import {
-  Activity, AppWindow, ArrowUpRight, Bell, Gauge, Info, Layers, LayoutDashboard, type LucideIcon, Palette, Plug,
-  Settings as Gear, SquareTerminal, TriangleAlert, X, ChevronLeft,
+  Activity, AppWindow, ArrowUpRight, Bell, Gauge, Info, Layers, LayoutDashboard, ListChecks, type LucideIcon, Palette,
+  Plug, Settings as Gear, SquareTerminal, TriangleAlert, X, ChevronLeft,
 } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useState } from "react";
@@ -16,6 +16,7 @@ import { Sparkline, Strip, ago, useAppearance } from "./components/ui";
 import { type Page, type Settings, type Spend, count, desk, hub, tokens, usd } from "./lib/hub";
 import { activeRows, totalLabel, warningLine } from "./lib/model";
 import { ProviderLogo, providerName, providerOf } from "./lib/providers";
+import { isActive, position } from "./lib/automations";
 import { progress, updater, usePrompture, useUpdater } from "./lib/updater";
 import { type DeskState, useDesk } from "./lib/useDesk";
 import "./styles/app.css";
@@ -25,11 +26,13 @@ import {
 } from "./views/Settings";
 import { ToolsCard, ToolsView } from "./views/Tools";
 import { ActivityPage } from "./views/ActivityPage";
+import { AutomationsPage } from "./views/Automations";
 import { AlertsView, HeadroomView } from "./views/Views";
 
 const DASHBOARD: Array<[Page, string, LucideIcon]> = [
   ["overview", "Overview", LayoutDashboard], ["activity", "Activity", Activity], ["tools", "Coding tools", SquareTerminal],
-  ["providers", "Providers", Layers], ["limits", "Limits", Gauge], ["alerts", "Alerts", TriangleAlert],
+  ["automations", "Automations", ListChecks], ["providers", "Providers", Layers], ["limits", "Limits", Gauge],
+  ["alerts", "Alerts", TriangleAlert],
 ];
 const SETTINGS: Array<[Page, string, LucideIcon]> = [
   ["widget", "Widget", AppWindow], ["appearance", "Appearance", Palette],
@@ -257,14 +260,19 @@ function DeskWindow() {
   // Before setup the dashboard has nothing to show, so it's replaced by onboarding; settings still open.
   const onboarding = adding || (!d.paired && !isSettings);
   const openAlerts = d.alerts.filter(a => !a.acknowledged_at).length;
-  const counts: Partial<Record<Page, number>> = { activity: d.running.length, alerts: openAlerts };
+  const queue = d.automations?.current;
+  const counts: Partial<Record<Page, number | string>> = {
+    activity: d.running.length, alerts: openAlerts,
+    automations: isActive(queue) ? `${position(queue)}/${queue.steps.length}` : undefined,
+  };
+  const countTone: Partial<Record<Page, string>> = { automations: queue?.status === "paused" ? "warn" : "" };
 
   const nav = (items: Array<[Page, string, LucideIcon]>) => items.map(([p, label, Icon]) => (
     <button key={p} className={`s-nav ${!onboarding && page === p ? "active" : ""}`}
       onClick={() => { setAdding(false); setPage(p); }}>
       <Icon className="s-nav-glyph" size={16} strokeWidth={1.75} aria-hidden />
       <span className="grow">{label}</span>
-      {!!counts[p] && <span className="d-count">{counts[p]}</span>}
+      {!!counts[p] && <span className={`d-count ${countTone[p] ?? ""}`}>{counts[p]}</span>}
     </button>
   ));
 
@@ -310,6 +318,7 @@ function DeskWindow() {
               {page === "overview" && <Overview d={d} s={s} go={setPage} />}
               {page === "activity" && <ActivityPage d={d} settings={s} />}
               {page === "tools" && <ToolsView settings={s} enabled={!!d.caps.coding_tools} />}
+              {page === "automations" && <AutomationsPage d={d} />}
               {page === "limits" && <div className="d-view"><HeadroomView d={d} /></div>}
               {page === "alerts" && <div className="d-view"><AlertsView d={d} /></div>}
               {page === "widget" && <WidgetSection s={s} save={save} />}

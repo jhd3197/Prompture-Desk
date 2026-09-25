@@ -60,6 +60,8 @@ export interface Capabilities {
   coding_tools?: boolean;
   /** Local companion only: per-day totals for the activity grid (/v1/activity). */
   activity?: boolean;
+  /** Local companion only: queued coding-agent steps (/v1/automations). */
+  automations?: boolean;
 }
 
 export interface HubInfo {
@@ -120,6 +122,74 @@ export interface Tools {
   /** Whether Claude Code's plan windows are fetched (opt-in; uses Claude Code's login). */
   claude_plan_usage?: boolean;
 }
+
+/** One step of an automation queue. */
+export interface AutomationStep {
+  id: string;
+  text: string;
+  /** "same" continues the previous step's session; "new" starts fresh. */
+  session: "same" | "new";
+  status: "waiting" | "running" | "done" | "failed" | "skipped" | "asked" | "stopped";
+  started_at: number | null;
+  ended_at: number | null;
+  duration_s: number;
+  cost_usd: number | null;
+  tokens: number;
+  /** What the agent is doing right now: "Editing src/app.py…". */
+  action: string | null;
+  /** When the attempt running now started (epoch seconds). */
+  running_since: number | null;
+  error: string | null;
+}
+
+/** A queue: coding-agent steps run one after another in a project folder. */
+export interface Automation {
+  id: string;
+  cwd: string;
+  project: string;
+  agent: string;
+  agent_name: string;
+  model: string | null;
+  status: "running" | "paused" | "finished" | "failed" | "stopped";
+  reason: "ask" | "limit" | "fail" | "cost" | "manual" | null;
+  /** Index of the step running or waiting on you. */
+  current: number;
+  /** Pause requested; takes effect when the running step finishes. */
+  pausing: boolean;
+  question: string | null;
+  resumes_at: number | null;
+  created_at: number;
+  ended_at: number | null;
+  note: string | null;
+  stop: { fail: boolean; ask: boolean; limit: boolean; cost_usd: number | null };
+  cost_usd: number;
+  duration_s: number;
+  steps: AutomationStep[];
+}
+
+/** A past run, as the history lists it. */
+export interface AutomationSummary extends Omit<Automation, "steps"> {
+  steps: Array<{ status: AutomationStep["status"]; text: string }>;
+  last: string | null;
+  last_error: string | null;
+}
+
+export interface Automations {
+  /** The running queue, or the last one while it's still on screen. */
+  current: Automation | null;
+  history: AutomationSummary[];
+  agents: Array<{ id: string; name: string; installed: boolean }>;
+}
+
+export interface NewAutomation {
+  cwd: string;
+  agent: string;
+  model: string | null;
+  steps: Array<{ text: string; session: "same" | "new" }>;
+  stop: Automation["stop"];
+}
+
+export interface LogLine { t: number; text: string; kind: "cmd" | "tool" | "msg" | "ok" | "err" | "info" | "you" }
 
 export type LocalProblem = { code: "not_installed" | "needs_upgrade" | "failed"; message: string };
 
@@ -274,7 +344,7 @@ function call<T>(method: string, path: string, body?: unknown): Promise<T> {
 
 /** Pages of Desk's window, dashboard first, then settings. */
 export type Page =
-  | "overview" | "activity" | "tools" | "limits" | "alerts"
+  | "overview" | "activity" | "tools" | "automations" | "limits" | "alerts"
   | "widget" | "appearance" | "providers" | "notifications" | "connection" | "about";
 
 export const hub = {
@@ -291,6 +361,19 @@ export const hub = {
   /** `tzOffset` is `Date.getTimezoneOffset()`, so days break at local midnight. */
   activity: (days: number, tzOffset: number) => call<Activity>("GET", `/v1/activity?days=${days}&tz_offset=${tzOffset}`),
   ackAlert: (id: number) => call<Alert>("POST", `/v1/alerts/${id}/ack`),
+  automations: () => call<Automations>("GET", "/v1/automations"),
+  automationRun: (id: string) => call<Automation>("GET", `/v1/automations/runs/${id}`),
+  automationLog: (run: string, step: string) =>
+    call<{ lines: LogLine[] }>("GET", `/v1/automations/runs/${run}/steps/${step}/log`),
+  /** `/gsd:execute-phase N` for each unchecked phase in the folder's .planning/ROADMAP.md. */
+  roadmap: (cwd: string) => call<{ steps: string[] }>("GET", `/v1/automations/roadmap?cwd=${encodeURIComponent(cwd)}`),
+  startAutomation: (body: NewAutomation) => call<Automation>("POST", "/v1/automations", body),
+  /** Replace the steps that haven't started (ids keep the ones that stay). */
+  setSteps: (steps: Array<{ id?: string; text: string; session: "same" | "new" }>) =>
+    call<Automation>("POST", "/v1/automations/current/steps", { steps }),
+  automationAction: (action: "pause" | "resume" | "skip" | "stop") =>
+    call<Automation>("POST", `/v1/automations/current/${action}`, {}),
+  answer: (text: string) => call<Automation>("POST", "/v1/automations/current/answer", { text }),
   pauseKey: (id: number) => call<KeyLimits>("POST", `/v1/keys/${id}/pause`),
   resumeKey: (id: number) => call<KeyLimits>("POST", `/v1/keys/${id}/resume`),
   updateKey: (id: number, data: { route_override?: string; daily_spend_cap_usd?: number }) =>

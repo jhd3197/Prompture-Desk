@@ -1,12 +1,13 @@
 import {
   currentMonitor, cursorPosition, getCurrentWindow, LogicalSize, PhysicalPosition, primaryMonitor,
 } from "@tauri-apps/api/window";
-import { ArrowUpRight, Check, TriangleAlert } from "lucide-react";
+import { ArrowUpRight, Check, Pause, Play, TriangleAlert } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { Mark } from "./components/Mark";
 import { Strip, useAppearance } from "./components/ui";
-import { type LiveEvent, type Settings, desk, hub, tokens, usd } from "./lib/hub";
+import { duration, isActive, position, runSeconds, stepLabel, stepSeconds } from "./lib/automations";
+import { type Automation, type LiveEvent, type Settings, desk, hub, tokens, usd } from "./lib/hub";
 import { type ProviderRow, activeRows, isDetailed, totalLabel, warningLine } from "./lib/model";
 import { ProviderLogo, providerName, providerOf } from "./lib/providers";
 import { type DeskState, useDesk } from "./lib/useDesk";
@@ -20,6 +21,7 @@ const MORPH_MS = 520; // island and dock shape transitions (CSS: .5s / .45s)
 const LEAVE_GRACE_MS = 280; // a pointer leaving this briefly doesn't collapse anything
 const DONE_MS = 2600; // how long "call finished" shows
 const TAB_W = 8; // width of a tucked dock's edge tab (and its hover target)
+const QUEUE_DONE_MS = 60_000; // how long a finished queue stays in the capsule
 
 // ---------------------------------------------------------------- shared
 
@@ -86,6 +88,20 @@ function useJustFinished(d: DeskState): LiveEvent | null {
 
 function Pulse() { return <span className="pulse-dot" />; }
 
+/** The queue the capsule shows: one running, or one that finished in the last minute. Ticks each second. */
+function useQueue(d: DeskState): Automation | null {
+  const q = d.automations?.current ?? null;
+  const [, tick] = useState(0);
+  const recent = q?.status === "finished" && !!q.ended_at && Date.now() - q.ended_at * 1000 < QUEUE_DONE_MS;
+  const shown = isActive(q) || recent;
+  useEffect(() => {
+    if (!shown) return;
+    const t = window.setInterval(() => tick(n => n + 1), 1000);
+    return () => window.clearInterval(t);
+  }, [shown]);
+  return shown ? q : null;
+}
+
 /** The dock's way into Desk; an amber badge stands in for the old warning dot. */
 function DeskButton({ page, warn }: { page: Settings["dock_button"]; warn: string | null }) {
   return (
@@ -124,7 +140,7 @@ function Shimmer({ w }: { w: number }) { return <span className="shim" style={{ 
 
 // ---------------------------------------------------------------- Top capsule (island)
 
-type Mode = Phase | "sliver" | "done" | "expanded";
+type Mode = Phase | "sliver" | "done" | "expanded" | "queue";
 interface Box { w: number; h: number; r: number; top: number }
 
 const SLIVER: Box = { w: 60, h: 5, r: 3, top: 0 };
@@ -169,13 +185,18 @@ function Island({ d, settings }: { d: DeskState; settings: Settings }) {
   const [open, setOpen] = useState(false);
   const done = useJustFinished(d);
   const connected = p === "live" || p === "idle";
+  const queue = useQueue(d);
+  // A queue waiting on you stays out even when the capsule hides until hovered.
+  const needsYou = !!queue && queue.status === "paused";
 
   // Reveal on hover: leaving closes the panel too.
   useEffect(() => { if (!hovered && settings.visibility === "hover") setOpen(false); }, [hovered, settings.visibility]);
   useEffect(() => { if (!connected) setOpen(false); }, [connected]);
 
-  const tucked = settings.visibility === "hover" && connected && !hovered && !open && !done;
-  const mode: Mode = open && connected ? "expanded" : done && connected ? "done" : tucked ? "sliver" : p;
+  const tucked = settings.visibility === "hover" && connected && !hovered && !open && !done && !needsYou;
+  const mode: Mode = open && connected ? "expanded"
+    : queue && connected && !tucked ? "queue"
+      : done && connected ? "done" : tucked ? "sliver" : p;
 
   // Natural size of each layer, so the island can animate between them.
   const layers = useRef<Partial<Record<Mode, HTMLDivElement | null>>>({});
@@ -196,7 +217,8 @@ function Island({ d, settings }: { d: DeskState; settings: Settings }) {
   const box = useIslandWindow(target);
 
   const onClick = () => {
-    if (p === "setup") desk.open();
+    if (mode === "queue") desk.open("automations");
+    else if (p === "setup") desk.open();
     else if (p === "offline") desk.open("connection");
     else if (connected) setOpen(o => !o);
   };
@@ -261,6 +283,9 @@ function Island({ d, settings }: { d: DeskState; settings: Settings }) {
           </span>
           <span className="num isl-done-val">{doneValue}</span>
         </div>
+        <div {...layer("queue")} title="Open Automations">
+          {queue && <QueueLayer run={queue} />}
+        </div>
         <div {...layer("expanded")}>
           <div className="isl-head">
             <span className="row" style={{ gap: 8, alignItems: "baseline" }}>
@@ -286,6 +311,28 @@ function Island({ d, settings }: { d: DeskState; settings: Settings }) {
         </div>
       </div>
     </div>
+  );
+}
+
+/** "▶ 2/4 · Phase 4 · 14m", with a thin progress line; amber while it waits on you. */
+function QueueLayer({ run }: { run: Automation }) {
+  const finished = run.status === "finished";
+  const paused = run.status === "paused";
+  const step = run.steps[Math.min(run.current, run.steps.length - 1)];
+  const progress = finished ? 1 : (run.current + 0.5) / Math.max(1, run.steps.length);
+  const tone = paused ? "warn" : "ok";
+  return (
+    <>
+      <span className={`isl-q-icon ${tone}`}>
+        {paused ? <Pause size={11} aria-hidden /> : finished ? <Check size={11} aria-hidden /> : <Play size={11} aria-hidden />}
+      </span>
+      <span className={`num isl-q-count ${tone}`}>{position(run)}/{run.steps.length}</span>
+      <span className="isl-sub">·</span>
+      <span className="isl-text">{finished ? "queue done" : step ? stepLabel(step.text) : ""}</span>
+      <span className="isl-sub">·</span>
+      <span className="num isl-sub">{duration(finished ? runSeconds(run) : step ? stepSeconds(step) : 0)}</span>
+      <span className="isl-q-bar"><span className={`tone-${tone}`} style={{ width: `${(progress * 100).toFixed(1)}%` }} /></span>
+    </>
   );
 }
 

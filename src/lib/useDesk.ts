@@ -9,9 +9,10 @@ import {
   isPermissionGranted, requestPermission, sendNotification,
 } from "@tauri-apps/plugin-notification";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { automationNotice, isActive, isEnded } from "./automations";
 import {
-  type Alert, type Capabilities, type LiveEvent, type LiveStatus, type Limits, type Settings, type Spend,
-  HUB_CAPABILITIES, desk, hub,
+  type Alert, type Automation, type Automations, type Capabilities, type LiveEvent, type LiveStatus, type Limits,
+  type Settings, type Spend, HUB_CAPABILITIES, desk, hub,
 } from "./hub";
 import { tr } from "./i18n";
 import { type ProviderRow, providerRows, totalLabel } from "./model";
@@ -19,6 +20,8 @@ import { type ProviderRow, providerRows, totalLabel } from "./model";
 /** Finished calls kept for the activity sparkline. */
 const HISTORY_MS = 30 * 60_000;
 const LONG_CALL_MS = 30_000;
+/** How often a running queue is re-read (its timer and current action). */
+const AUTOMATION_POLL_MS = 3000;
 
 export interface DeskState {
   settings: Settings | null;
@@ -35,6 +38,11 @@ export interface DeskState {
   /** "local" (Prompture on this PC) or "hub". */
   mode: "local" | "hub" | null;
   caps: Capabilities;
+  /** Queued coding-agent steps (local companion with automations), else null. */
+  automations: Automations | null;
+  /** Take a queue as the companion returned it after an action. */
+  setAutomation: (run: Automation) => void;
+  reloadAutomations: () => void;
   error: string | null;
   refresh: () => void;
   reloadSettings: () => Promise<void>;
@@ -53,6 +61,8 @@ export function useDesk({ primary }: { primary: boolean }): DeskState {
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [caps, setCaps] = useState<Capabilities>(HUB_CAPABILITIES);
+  const [automations, setAutomations] = useState<Automations | null>(null);
+  const lastRun = useRef<Automation | null>(null);
   const settingsRef = useRef<Settings | null>(null);
   const spendTimer = useRef<number | undefined>(undefined);
 
@@ -98,6 +108,41 @@ export function useDesk({ primary }: { primary: boolean }): DeskState {
     if (granted) sendNotification({ title: tr(title), body: tr(body) });
     if (settingsRef.current?.play_sound) desk.playAlertSound().catch(() => undefined);
   }, [primary]);
+
+  // A queue as last seen, so a change can raise a notification ("Step done", "Needs you").
+  const takeRun = useCallback((run: Automation) => {
+    const notice = automationNotice(lastRun.current, run);
+    lastRun.current = run;
+    if (notice) notify(notice.title, notice.body);
+    setAutomations(a => {
+      if (!a) return a;
+      const ended = isEnded(run);
+      const history = ended ? [{ ...run, steps: run.steps.map(x => ({ status: x.status, text: x.text })), last: null, last_error: null },
+        ...a.history.filter(h => h.id !== run.id)] : a.history;
+      return { ...a, current: run, history };
+    });
+  }, [notify]);
+  const reloadAutomations = useCallback(() => {
+    hub.automations().then(a => {
+      if (a.current) {
+        const notice = automationNotice(lastRun.current, a.current);
+        if (notice) notify(notice.title, notice.body);
+      }
+      lastRun.current = a.current;
+      setAutomations(a);
+    }).catch(() => undefined);
+  }, [notify]);
+  const hasAutomations = !!caps.automations;
+  useEffect(() => {
+    if (!live || !hasAutomations) { if (!hasAutomations) setAutomations(null); return; }
+    reloadAutomations();
+  }, [live, hasAutomations, reloadAutomations]);
+  const queueActive = isActive(automations?.current);
+  useEffect(() => {
+    if (!queueActive) return;
+    const timer = window.setInterval(reloadAutomations, AUTOMATION_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [queueActive, reloadAutomations]);
 
   useEffect(() => {
     // A window can load before the app has finished starting; keep asking until it answers.
@@ -189,11 +234,14 @@ export function useDesk({ primary }: { primary: boolean }): DeskState {
             loadLimits();
             if (ev.paused && prefs?.notify_paused) notify("Provider paused", `${ev.provider} is paused on the hub.`);
             break;
+          case "automation.updated":
+            if (ev.automation) takeRun(ev.automation as Automation);
+            break;
         }
       }),
     ];
     return () => { unlisten.forEach(p => p.then(fn => fn())); };
-  }, [notify, loadSpend, loadAlerts, loadLimits]);
+  }, [notify, loadSpend, loadAlerts, loadLimits, takeRun]);
 
   const runningList = useMemo(
     () => Object.values(running).sort((a, b) => (a.ts ?? "").localeCompare(b.ts ?? "")),
@@ -226,6 +274,6 @@ export function useDesk({ primary }: { primary: boolean }): DeskState {
 
   return {
     settings, paired, status, setup, running: runningList, finished, limits, spend, alerts, rows, mode, caps, error,
-    refresh, reloadSettings,
+    automations, setAutomation: takeRun, reloadAutomations, refresh, reloadSettings,
   };
 }
