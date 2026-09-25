@@ -1,5 +1,11 @@
 # Third-party licenses
 
+## Lucide (`lucide-react`)
+
+Interface icons (sidebar, close, links, warnings) are from [Lucide](https://lucide.dev),
+licensed ISC by Lucide Contributors (parts derived from Feather, MIT by Cole Bemis).
+See https://github.com/lucide-icons/lucide/blob/main/LICENSE.
+
 ## uv
 
 Desk ships the `uv` binary (fetched and checksum-verified by `scripts/fetch-uv.mjs`)

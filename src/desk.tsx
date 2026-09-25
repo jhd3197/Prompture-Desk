@@ -2,6 +2,10 @@
 // one sidebar. It opens centred from the tray, the tray menu and the widget.
 
 import { listen } from "@tauri-apps/api/event";
+import {
+  Activity, AppWindow, ArrowUpRight, Bell, Gauge, Info, Layers, LayoutDashboard, type LucideIcon, Palette, Plug,
+  TriangleAlert, X,
+} from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useState } from "react";
 import ReactDOM from "react-dom/client";
@@ -18,12 +22,13 @@ import {
 } from "./views/Settings";
 import { AlertsView, HeadroomView, NowView } from "./views/Views";
 
-const DASHBOARD: Array<[Page, string, string]> = [
-  ["overview", "Overview", "◉"], ["activity", "Activity", "↯"], ["limits", "Limits", "▥"], ["alerts", "Alerts", "▲"],
+const DASHBOARD: Array<[Page, string, LucideIcon]> = [
+  ["overview", "Overview", LayoutDashboard], ["activity", "Activity", Activity], ["limits", "Limits", Gauge],
+  ["alerts", "Alerts", TriangleAlert],
 ];
-const SETTINGS: Array<[Page, string, string]> = [
-  ["widget", "Widget", "▣"], ["appearance", "Appearance", "◐"], ["providers", "Providers", "◇"],
-  ["notifications", "Notifications", "◔"], ["connection", "Connection", "⇄"], ["about", "About", "ⓘ"],
+const SETTINGS: Array<[Page, string, LucideIcon]> = [
+  ["widget", "Widget", AppWindow], ["appearance", "Appearance", Palette], ["providers", "Providers", Layers],
+  ["notifications", "Notifications", Bell], ["connection", "Connection", Plug], ["about", "About", Info],
 ];
 const TITLES = Object.fromEntries([...DASHBOARD, ...SETTINGS].map(([p, t]) => [p, t])) as Record<Page, string>;
 
@@ -85,7 +90,7 @@ function Overview({ d, s, go }: { d: DeskState; s: Settings; go: (p: Page) => vo
         </div>
       </section>
 
-      {warn && <button className="d-warn" onClick={() => go("limits")}>▲ {warn}</button>}
+      {warn && <button className="d-warn" onClick={() => go("limits")}><TriangleAlert size={14} aria-hidden /> {warn}</button>}
 
       <div className="d-grid">
         <section className="d-card">
@@ -195,10 +200,10 @@ function DeskWindow() {
   const openAlerts = d.alerts.filter(a => !a.acknowledged_at).length;
   const counts: Partial<Record<Page, number>> = { activity: d.running.length, alerts: openAlerts };
 
-  const nav = (items: Array<[Page, string, string]>) => items.map(([p, label, glyph]) => (
+  const nav = (items: Array<[Page, string, LucideIcon]>) => items.map(([p, label, Icon]) => (
     <button key={p} className={`s-nav ${!onboarding && page === p ? "active" : ""}`}
       onClick={() => { setAdding(false); setPage(p); }}>
-      <span className="s-nav-glyph" aria-hidden>{glyph}</span>
+      <Icon className="s-nav-glyph" size={16} strokeWidth={1.75} aria-hidden />
       <span className="grow">{label}</span>
       {!!counts[p] && <span className="d-count">{counts[p]}</span>}
     </button>
@@ -218,12 +223,12 @@ function DeskWindow() {
         <span className="d-group">Settings</span>
         {nav(SETTINGS)}
         <span className="grow" data-tauri-drag-region />
-        {d.mode === "hub" && <button className="d-link d-side-link" onClick={() => desk.openDashboard()}>Hub dashboard ↗</button>}
+        {d.mode === "hub" && <button className="d-link d-side-link" onClick={() => desk.openDashboard()}>Hub dashboard <ArrowUpRight size={13} aria-hidden /></button>}
       </nav>
       <div className="s-main">
         <header className="s-head" data-tauri-drag-region>
           <span data-tauri-drag-region>{onboarding ? (adding ? "Connect a prompture-hub" : "Welcome") : TITLES[page]}</span>
-          <button className="s-close" onClick={hide} aria-label="Close">×</button>
+          <button className="s-close" onClick={hide} aria-label="Close"><X size={18} /></button>
         </header>
         <div className="s-body">
           {onboarding ? (

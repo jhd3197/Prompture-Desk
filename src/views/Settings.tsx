@@ -2,6 +2,7 @@
 // through `save`; changes apply right away.
 
 import { getVersion } from "@tauri-apps/api/app";
+import { ArrowUpRight, GripVertical } from "lucide-react";
 import { emit } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
 import { Mark } from "../components/Mark";
@@ -133,7 +134,7 @@ export function ProvidersSection({ s, save, d }: { s: Settings; save: Save; d: D
   return (
     <Field title="Providers in the widget" hint="Toggle what shows and drag to reorder. The budget is the daily cap each strip fills against.">
       {prefs.length === 0 ? (
-        <div className="s-empty">Providers appear here once calls go through the hub.</div>
+        <div className="s-empty">Providers appear here once calls go through {d.mode === "hub" ? "the hub" : "Prompture"}.</div>
       ) : (
         <div className="s-list">
           {prefs.map((p, i) => {
@@ -142,7 +143,7 @@ export function ProvidersSection({ s, save, d }: { s: Settings; save: Save; d: D
               <div key={p.id} className={`s-list-row ${drag === i ? "dragging" : ""}`} draggable
                 onDragStart={() => setDrag(i)} onDragEnd={() => setDrag(null)}
                 onDragOver={e => { e.preventDefault(); if (drag != null && drag !== i) { move(drag, i); setDrag(i); } }}>
-                <span className="s-grip" aria-hidden>⋮⋮</span>
+                <GripVertical className="s-grip" size={16} aria-hidden />
                 <ProviderLogo id={p.id} size={28} />
                 <span className="s-list-name">{providerName(p.id)}
                   {row && <small>{row.value} today</small>}
@@ -171,7 +172,7 @@ export function AlertsSection({ s, save }: { s: Settings; save: Save }) {
         <ToggleRow label="Notify on failed calls" sub="Every call that ends in an error" on={s.notify_errors} onChange={v => save({ notify_errors: v })} />
         <ToggleRow label="Play a sound" sub="Uses the system alert sound" on={s.play_sound} onChange={v => { save({ play_sound: v }); if (v) desk.playAlertSound(); }} />
       </div>
-      <button className="s-link" onClick={() => desk.openDashboard()}>Edit alert rules in the hub dashboard ↗</button>
+      <button className="s-link" onClick={() => desk.openDashboard()}>Edit alert rules in the hub dashboard <ArrowUpRight size={13} aria-hidden /></button>
     </>
   );
 }
@@ -258,7 +259,7 @@ export function AboutSection() {
         <span className="num s-muted">v{version} · {platform}</span>
       </div>
       <p className="s-muted" style={{ margin: 0, fontSize: 13 }}>
-        What your Prompture apps are spending, built on <strong>Prompture</strong>. Provider logos from LobeHub Icons (MIT).
+        What your Prompture apps are spending, built on <strong>Prompture</strong>. Provider logos from LobeHub Icons (MIT), interface icons from Lucide (ISC).
       </p>
       <p className="s-muted" style={{ margin: 0, fontSize: 13 }}>
         Automatic updates will arrive with signed releases. For now, install new builds over this one.

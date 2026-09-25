@@ -31,33 +31,48 @@ async function download(url) {
   return Buffer.from(await res.arrayBuffer());
 }
 
-const triple = targetTriple();
-const windows = triple.includes("windows");
-const exe = windows ? ".exe" : "";
-const dest = join(root, "src-tauri", "binaries", `uv-${triple}${exe}`);
-if (existsSync(dest)) process.exit(0);
+/** Download, verify and unpack uv for one target triple into `work`; returns the binary's path. */
+async function fetchUv(triple, work) {
+  const windows = triple.includes("windows");
+  const exe = windows ? ".exe" : "";
+  // uv publishes msvc builds only; a gnu Rust host still runs them.
+  const asset = `uv-${triple.replace("windows-gnu", "windows-msvc")}${windows ? ".zip" : ".tar.gz"}`;
+  const base = `https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/${asset}`;
+  console.log(`fetching uv ${UV_VERSION} (${asset})`);
 
-// uv publishes msvc builds only; a gnu Rust host still runs them.
-const asset = `uv-${triple.replace("windows-gnu", "windows-msvc")}${windows ? ".zip" : ".tar.gz"}`;
-const base = `https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/${asset}`;
-console.log(`fetching uv ${UV_VERSION} (${asset})`);
+  const [archive, sums] = await Promise.all([download(base), download(`${base}.sha256`)]);
+  const expected = sums.toString("utf8").trim().split(/\s+/)[0].toLowerCase();
+  const actual = createHash("sha256").update(archive).digest("hex");
+  if (actual !== expected) throw new Error(`uv checksum mismatch: expected ${expected}, got ${actual}`);
 
-const [archive, sums] = await Promise.all([download(base), download(`${base}.sha256`)]);
-const expected = sums.toString("utf8").trim().split(/\s+/)[0].toLowerCase();
-const actual = createHash("sha256").update(archive).digest("hex");
-if (actual !== expected) throw new Error(`uv checksum mismatch: expected ${expected}, got ${actual}`);
-
-const work = mkdtempSync(join(tmpdir(), "desk-uv-"));
-try {
-  const file = join(work, asset);
+  const dir = join(work, triple);
+  mkdirSync(dir, { recursive: true });
+  const file = join(dir, asset);
   writeFileSync(file, archive);
   // Windows ships bsdtar, which reads zip; name it so a GNU tar on PATH (Git Bash) is not used.
   const tar = windows ? join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tar.exe") : "tar";
-  execFileSync(tar, ["-xf", file, "-C", work]);
-  const found = [join(work, `uv${exe}`), join(work, asset.replace(/\.(zip|tar\.gz)$/, ""), `uv${exe}`)].find(existsSync);
+  execFileSync(tar, ["-xf", file, "-C", dir]);
+  const found = [join(dir, `uv${exe}`), join(dir, asset.replace(/\.(zip|tar\.gz)$/, ""), `uv${exe}`)].find(existsSync);
   if (!found) throw new Error("uv binary not found in the archive");
+  return found;
+}
+
+const triple = targetTriple();
+const windows = triple.includes("windows");
+const dest = join(root, "src-tauri", "binaries", `uv-${triple}${windows ? ".exe" : ""}`);
+if (existsSync(dest)) process.exit(0);
+
+const work = mkdtempSync(join(tmpdir(), "desk-uv-"));
+try {
   mkdirSync(dirname(dest), { recursive: true });
-  renameSync(found, dest);
+  if (triple === "universal-apple-darwin") {
+    // uv has no universal build; merge the two macOS builds into one.
+    const arm = await fetchUv("aarch64-apple-darwin", work);
+    const intel = await fetchUv("x86_64-apple-darwin", work);
+    execFileSync("lipo", ["-create", "-output", dest, arm, intel]);
+  } else {
+    renameSync(await fetchUv(triple, work), dest);
+  }
   if (!windows) execFileSync("chmod", ["+x", dest]);
 } finally {
   rmSync(work, { recursive: true, force: true });
