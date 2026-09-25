@@ -2970,7 +2970,7 @@ dependencies = [
 
 [[package]]
 name = "prompture-desk"
-version = "0.1.0"
+version = "0.1.4"
 dependencies = [
  "chrono",
  "futures-util",
@@ -5006,6 +5006,7 @@ dependencies = [
 [[package]]
 name = "vela-companion"
 version = "0.1.0"
+source = "git+https://github.com/jhd3197/vela-companion#8593254dadeeac397be41359973fbddaad320770"
 dependencies = [
  "serde",
  "serde_json",
