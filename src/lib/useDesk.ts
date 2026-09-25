@@ -194,7 +194,8 @@ export function useDesk({ primary }: { primary: boolean }): DeskState {
       : [`${total.value} ${total.sub}`, `${runningList.length} running`, `${open} alert${open === 1 ? "" : "s"}`];
     desk.updateTray({
       state: offline ? "offline" : open > 0 || warn ? "attention" : "ok",
-      bars: visible.slice(0, 5).map(r => ({ fraction: Math.min(1, r.pct / 100), tone: r.tone })),
+      // Bars only when the tray icon is the widget; otherwise it stays the app icon.
+      bars: settings.widget_style !== "tray" ? [] : visible.slice(0, 5).map(r => ({ fraction: Math.min(1, r.pct / 100), tone: r.tone })),
       alert: settings.show_alerts && (open > 0 || warn),
       tooltip: `Prompture Desk — ${parts.join(" · ")}`,
     }).catch(() => undefined);

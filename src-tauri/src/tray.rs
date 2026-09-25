@@ -1,11 +1,13 @@
 //! The tray chip: a tray icon redrawn from hub state.
 //!
-//! The icon is rendered in code on a dark rounded tile: one vertical bar per
-//! visible provider (height = share of its budget used, colour = ok / near
-//! limit / paused) and an amber dot when an alert is open. Offline shows a dim
-//! tile; with no providers yet it shows the app's "P" mark. The tooltip carries
-//! the one-line summary. The panel window computes the numbers and sends a
-//! [`TraySummary`].
+//! Normally the icon is the app's own (`icons/32x32.png`), greyed out while
+//! offline. In the Tray chip style the panel sends bars, and the icon becomes a
+//! dark rounded tile with one vertical bar per visible provider (height = share
+//! of its budget used, colour = ok / near limit / paused). Either way an amber
+//! dot marks an open alert. The tooltip carries the one-line summary. The panel
+//! window computes the numbers and sends a [`TraySummary`].
+
+use std::sync::OnceLock;
 
 use serde::Deserialize;
 use tauri::image::Image;
@@ -43,7 +45,6 @@ const TRACK: Rgb = (58, 63, 71);
 const OK: Rgb = (63, 191, 116);
 const WARN: Rgb = (229, 163, 58);
 const PAUSED: Rgb = (107, 114, 128);
-const OFFLINE_TILE: Rgb = (32, 34, 38);
 
 fn tone(t: &str) -> Rgb {
     match t {
@@ -60,10 +61,30 @@ fn in_rounded_rect(x: u32, y: u32, radius: f64) -> bool {
     (fx - cx).powi(2) + (fy - cy).powi(2) <= radius * radius
 }
 
+/// The app icon as 32×32 RGBA.
+fn app_icon() -> &'static [u8] {
+    static ICON: OnceLock<Vec<u8>> = OnceLock::new();
+    ICON.get_or_init(|| {
+        let icon = Image::from_bytes(include_bytes!("../icons/32x32.png")).expect("bundled 32x32 icon");
+        assert_eq!((icon.width(), icon.height()), (SIZE, SIZE));
+        icon.rgba().to_vec()
+    })
+}
+
 /// Render the 32×32 RGBA icon. Pure so it can be unit-tested.
 pub fn render(summary: &TraySummary) -> Vec<u8> {
     let offline = summary.state == "offline";
-    let mut px = vec![0u8; (SIZE * SIZE * 4) as usize];
+    let bars: Vec<&TrayBar> = summary.bars.iter().take(MAX_BARS).collect();
+    let mut px = if offline || bars.is_empty() { app_icon().to_vec() } else { vec![0u8; (SIZE * SIZE * 4) as usize] };
+    if offline {
+        // Grey, dimmed: the same icon, clearly not live.
+        for p in px.chunks_exact_mut(4) {
+            let luma = (0.299 * p[0] as f64 + 0.587 * p[1] as f64 + 0.114 * p[2] as f64) * 0.6;
+            p[0] = luma as u8;
+            p[1] = luma as u8;
+            p[2] = luma as u8;
+        }
+    }
     let mut put = |x: u32, y: u32, c: Rgb| {
         let i = ((y * SIZE + x) * 4) as usize;
         px[i] = c.0;
@@ -71,31 +92,14 @@ pub fn render(summary: &TraySummary) -> Vec<u8> {
         px[i + 2] = c.2;
         px[i + 3] = 255;
     };
-    for y in 0..SIZE {
-        for x in 0..SIZE {
-            if in_rounded_rect(x, y, 7.0) {
-                put(x, y, if offline { OFFLINE_TILE } else { TILE });
-            }
-        }
-    }
-
-    let bars: Vec<&TrayBar> = summary.bars.iter().take(MAX_BARS).collect();
-    if offline || bars.is_empty() {
-        // The "P" mark: dim when offline, accent when connected with nothing to show yet.
-        let c = if offline { PAUSED } else { OK };
-        for y in 7..25 {
-            for x in 10..14 {
-                put(x, y, c);
-            }
-        }
-        for y in 7..17 {
-            for x in 14..23 {
-                if !((14..19).contains(&x) && (11..13).contains(&y)) {
-                    put(x, y, c);
+    if !offline && !bars.is_empty() {
+        for y in 0..SIZE {
+            for x in 0..SIZE {
+                if in_rounded_rect(x, y, 7.0) {
+                    put(x, y, TILE);
                 }
             }
         }
-    } else {
         // Bars sit on a baseline, centred as a group.
         let (bar_w, gap, bottom, max_h) = (3u32, 2u32, 26u32, 18.0_f64);
         let group = bars.len() as u32 * bar_w + (bars.len() as u32 - 1) * gap;
@@ -176,8 +180,14 @@ mod tests {
     }
 
     #[test]
-    fn corners_are_transparent() {
+    fn without_bars_it_is_the_app_icon() {
         let img = render(&TraySummary { state: "ok".into(), ..Default::default() });
+        assert_eq!(img, app_icon());
+    }
+
+    #[test]
+    fn tile_corners_are_transparent() {
+        let img = render(&TraySummary { state: "ok".into(), bars: vec![bar(0.5, "ok")], ..Default::default() });
         assert_eq!(pixel(&img, 0, 0)[3], 0);
         assert_eq!(pixel(&img, 16, 30)[3], 255);
     }
@@ -200,8 +210,12 @@ mod tests {
     fn alert_dot_and_offline() {
         let alerting = render(&TraySummary { state: "ok".into(), bars: vec![bar(0.2, "ok")], alert: true, ..Default::default() });
         assert_eq!(pixel(&alerting, 25, 6), [229, 163, 58, 255]);
+        // Offline: the app icon in grey, bars and alert ignored.
         let offline = render(&TraySummary { state: "offline".into(), bars: vec![bar(0.9, "ok")], alert: true, ..Default::default() });
-        assert_eq!(pixel(&offline, 25, 6), [32, 34, 38, 255]);
-        assert_eq!(pixel(&offline, 11, 20), [107, 114, 128, 255]);
+        let icon = app_icon();
+        for (o, i) in offline.chunks_exact(4).zip(icon.chunks_exact(4)) {
+            assert!(o[0] == o[1] && o[1] == o[2]);
+            assert_eq!(o[3], i[3]);
+        }
     }
 }

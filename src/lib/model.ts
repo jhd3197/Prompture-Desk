@@ -1,7 +1,7 @@
 // Per-provider rows for the widgets: today's spend (or tokens) against the
 // user's daily budget, the tightest provider rate window, running calls and
 // whether the provider is paused on the hub.
-import { type Alert, type LiveEvent, type Limits, type ProviderPref, type Settings, type Spend, tokens, usd } from "./hub";
+import { type Alert, type LiveEvent, type Limits, type ProviderPref, type Settings, type Spend, tokens, usd, windowName } from "./hub";
 import { providerName, providerOf } from "./providers";
 
 export type Tone = "ok" | "warn" | "paused";
@@ -18,6 +18,8 @@ export interface ProviderRow {
   /** Share of the tightest rate-limit window used, in percent. */
   rateUsed: number | null;
   rateLabel: string | null;
+  /** Whether that window is an API rate limit or a subscription plan's usage window. */
+  rateKind: "rate" | "plan";
   running: number;
   paused: boolean;
   tone: Tone;
@@ -63,14 +65,16 @@ export function providerRows(
 
     let rateUsed: number | null = null;
     let rateLabel: string | null = null;
+    let rateKind: "rate" | "plan" = "rate";
     for (const target of limits?.providers ?? []) {
       if (providerOf(target.target) !== id || target.current_headroom == null) continue;
       const used = Math.round((1 - target.current_headroom) * 100);
       if (rateUsed == null || used > rateUsed) {
         rateUsed = used;
         const w = target.current_window ? target.windows?.[target.current_window] : undefined;
-        const unit = (target.current_window ?? "").replace(/_/g, " ");
-        rateLabel = w?.limit != null && w.remaining != null
+        const unit = windowName(target.current_window);
+        rateKind = target.source === "plan" ? "plan" : "rate";
+        rateLabel = rateKind === "rate" && w?.limit != null && w.remaining != null
           ? `${tokens(w.limit - w.remaining)} / ${tokens(w.limit)} ${unit}`
           : `${used}% of ${unit}`;
       }
@@ -91,6 +95,7 @@ export function providerRows(
       pct,
       rateUsed,
       rateLabel,
+      rateKind,
       running: running.filter(r => providerOf(r.routed_to ?? r.model) === id).length,
       paused: isPaused,
       tone: isPaused ? "paused" : worst >= settings.warn_at ? "warn" : "ok",
@@ -116,7 +121,7 @@ export function warningLine(alerts: Alert[], rows: ProviderRow[], settings: Sett
   if (!hot) return null;
   return hot.pct >= (hot.rateUsed ?? 0)
     ? `${hot.name} at ${Math.round(hot.pct)}% of today's ${settings.metric === "tokens" ? "token " : ""}budget`
-    : `${hot.name} at ${hot.rateUsed}% of its rate window`;
+    : `${hot.name} at ${hot.rateUsed}% of its ${hot.rateKind === "plan" ? "plan" : "rate window"}`;
 }
 
 export function isDetailed(settings: Settings): boolean {

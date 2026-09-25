@@ -373,7 +373,7 @@ function ProviderCard({
       </div>
       {row.rateUsed != null && (
         <div className="kv">
-          <div className="kv-top"><span>Rate window</span><span>{row.rateLabel}</span></div>
+          <div className="kv-top"><span>{row.rateKind === "plan" ? "Plan" : "Rate window"}</span><span>{row.rateLabel}</span></div>
           <Strip pct={row.rateUsed} tone={row.rateUsed >= warnAt ? "warn" : "ok"} height={5} />
         </div>
       )}

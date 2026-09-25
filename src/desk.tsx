@@ -4,7 +4,7 @@
 import { listen } from "@tauri-apps/api/event";
 import {
   Activity, AppWindow, ArrowUpRight, Bell, Gauge, Info, Layers, LayoutDashboard, type LucideIcon, Palette, Plug,
-  TriangleAlert, X,
+  SquareTerminal, TriangleAlert, X,
 } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useState } from "react";
@@ -20,10 +20,12 @@ import { Onboarding } from "./views/Onboarding";
 import {
   AboutSection, AlertsSection, AppearanceSection, ConnectionSection, ProvidersSection, type Save, WidgetSection,
 } from "./views/Settings";
+import { ToolsCard, ToolsView } from "./views/Tools";
 import { AlertsView, HeadroomView, NowView } from "./views/Views";
 
 const DASHBOARD: Array<[Page, string, LucideIcon]> = [
-  ["overview", "Overview", LayoutDashboard], ["activity", "Activity", Activity], ["limits", "Limits", Gauge],
+  ["overview", "Overview", LayoutDashboard], ["activity", "Activity", Activity], ["tools", "Coding tools", SquareTerminal],
+  ["limits", "Limits", Gauge],
   ["alerts", "Alerts", TriangleAlert],
 ];
 const SETTINGS: Array<[Page, string, LucideIcon]> = [
@@ -100,7 +102,7 @@ function Overview({ d, s, go }: { d: DeskState; s: Settings; go: (p: Page) => vo
           </header>
           {rows.length === 0 ? (
             <p className="d-empty">
-              No calls yet today. Anything your code runs through Prompture shows up here — tag it with
+              No calls yet today. Your coding tools (Claude Code, Codex, Kimi Code, …) and anything your code runs through Prompture show up here — tag your code with
               <code className="mono"> PROMPTURE_PROJECT=name</code> to see spend per project.
             </p>
           ) : (
@@ -114,7 +116,7 @@ function Overview({ d, s, go }: { d: DeskState; s: Settings; go: (p: Page) => vo
                       <span className="num d-prov-val">{r.value}<span className="d-of"> / {r.budget}</span></span>
                     </div>
                     <Strip pct={r.pct} tone={r.tone} height={5} />
-                    {r.rateLabel && <span className="d-prov-sub">Rate window {r.rateLabel}</span>}
+                    {r.rateLabel && <span className="d-prov-sub">{r.rateKind === "plan" ? "Plan" : "Rate window"} {r.rateLabel}</span>}
                   </div>
                 </div>
               ))}
@@ -123,6 +125,7 @@ function Overview({ d, s, go }: { d: DeskState; s: Settings; go: (p: Page) => vo
         </section>
 
         <div className="d-col">
+          <ToolsCard settings={s} enabled={!!d.caps.coding_tools} onOpen={() => go("tools")} />
           <section className="d-card">
             <header className="d-card-head"><h3>Projects today</h3></header>
             {projects.length === 0 ? (
@@ -152,7 +155,7 @@ function Overview({ d, s, go }: { d: DeskState; s: Settings; go: (p: Page) => vo
                 <div key={`${e.request_id}-${i}`} className="d-call">
                   {prov ? <ProviderLogo id={prov} size={18} /> : <span className="d-call-dot" />}
                   <span className="d-call-model mono ellipsis">{e.served_by ?? e.model}</span>
-                  <span className="d-call-sub">{e.project ?? (prov ? providerName(prov) : "")}</span>
+                  <span className="d-call-sub">{[e.key_name, e.project].filter(Boolean).join(" · ") || (prov ? providerName(prov) : "")}</span>
                   {e.status !== "ok"
                     ? <span className="d-tag danger">{e.status}</span>
                     : <span className="num d-call-cost">{usd(e.cost_usd ?? 0)}</span>}
@@ -239,6 +242,7 @@ function DeskWindow() {
             <>
               {page === "overview" && <Overview d={d} s={s} go={setPage} />}
               {page === "activity" && <div className="d-view"><NowView d={d} /></div>}
+              {page === "tools" && <ToolsView settings={s} enabled={!!d.caps.coding_tools} />}
               {page === "limits" && <div className="d-view"><HeadroomView d={d} /></div>}
               {page === "alerts" && <div className="d-view"><AlertsView d={d} /></div>}
               {page === "widget" && <WidgetSection s={s} save={save} />}

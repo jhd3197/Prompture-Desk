@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Meter, Sparkline, ago } from "../components/ui";
-import { type Alert, type KeyLimits, type LiveEvent, hub, usd } from "../lib/hub";
+import { type Alert, type KeyLimits, type LiveEvent, type ProviderLimits, TOOL_NAMES, hub, usd, windowName } from "../lib/hub";
 import type { DeskState } from "../lib/useDesk";
 
 function controlError(e: unknown): string {
@@ -35,7 +35,7 @@ function FinishedRow({ e }: { e: LiveEvent }) {
       <div className="item-main">
         <div className="item-title ellipsis mono">{e.served_by ?? e.model}</div>
         <div className="item-sub ellipsis">
-          {e.project ?? "no project"} · {e.latency_ms != null ? `${(e.latency_ms / 1000).toFixed(1)}s` : "—"}
+          {e.key_name && <>{e.key_name} · </>}{e.project ?? "no project"} · {e.latency_ms ?`${(e.latency_ms / 1000).toFixed(1)}s` : "—"}
           {e.fallback && " · fallback"}
         </div>
       </div>
@@ -125,27 +125,71 @@ function KeyCard({ k, onChanged }: { k: KeyLimits; onChanged: () => void }) {
   );
 }
 
+function resetsIn(at: number | null): string {
+  if (at == null) return "";
+  const mins = Math.max(0, Math.round((at * 1000 - Date.now()) / 60_000));
+  if (mins < 60) return `resets in ${mins}m`;
+  if (mins < 48 * 60) return `resets in ${Math.floor(mins / 60)}h ${mins % 60}m`;
+  return `resets ${new Date(at * 1000).toLocaleDateString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" })}`;
+}
+
+function PlanCard({ p }: { p: ProviderLimits }) {
+  const windows = Object.entries(p.windows ?? {}).filter(([, w]) => w.limit != null && w.remaining != null);
+  return (
+    <div className="item" style={{ flexDirection: "column", alignItems: "stretch", gap: 6 }}>
+      <div className="row between">
+        <span className="item-title">{p.tool_name ?? TOOL_NAMES[p.tool ?? ""] ?? p.target}</span>
+        {p.plan && <span className="item-sub">{p.plan}</span>}
+      </div>
+      {windows.map(([name, w]) => {
+        const reset = w.resets_at != null && w.resets_at * 1000 <= Date.now();
+        const used = reset ? 0 : 100 - (w.remaining ?? 0);
+        return (
+          <div key={name} className="stack" style={{ gap: 3 }}>
+            <div className="row between item-sub">
+              <span>{windowName(name)}</span>
+              <span className="tnum">{used}% used{w.resets_at != null && !reset ? ` · ${resetsIn(w.resets_at)}` : ""}</span>
+            </div>
+            <Meter fraction={(100 - used) / 100} invert />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export function HeadroomView({ d }: { d: DeskState }) {
   const l = d.limits;
   if (!l) return <div className="empty">{d.error ?? "Loading limits…"}</div>;
+  const plans = (l.providers ?? []).filter(p => p.source === "plan");
+  const rates = (l.providers ?? []).filter(p => p.source !== "plan");
   return (
     <>
+      {plans.length > 0 && (
+        <div className="card">
+          <h3>Coding plans</h3>
+          <div className="list">{plans.map(p => <PlanCard key={p.target} p={p} />)}</div>
+          <div className="faint" style={{ fontSize: 11, marginTop: 6 }}>
+            Subscription plan usage for the coding tools on this PC.
+          </div>
+        </div>
+      )}
       {l.keys.map(k => <KeyCard key={k.id} k={k} onChanged={d.refresh} />)}
       {!d.caps.key_controls && l.keys.length === 0 && (
         <div className="card muted" style={{ fontSize: 12 }}>
           Per-key spend caps and routes come with prompture-hub. Budgets per provider are in Settings › Providers.
         </div>
       )}
-      {l.providers && l.providers.length > 0 && (
+      {rates.length > 0 && (
         <div className="card">
           <h3>Provider rate limits</h3>
           <div className="list">
-            {l.providers.map(p => (
+            {rates.map(p => (
               <div key={p.target} className="item" style={{ flexDirection: "column", alignItems: "stretch", gap: 5 }}>
                 <div className="row between">
                   <span className="item-title mono ellipsis">{p.target}</span>
                   <span className="item-sub">
-                    {p.current_headroom == null ? "window reset" : `${Math.round(p.current_headroom * 100)}% of ${(p.current_window ?? "").replace(/_/g, " ")} left`}
+                    {p.current_headroom == null ? "window reset" : `${Math.round(p.current_headroom * 100)}% of ${windowName(p.current_window)} left`}
                   </span>
                 </div>
                 {p.current_headroom != null && <Meter fraction={p.current_headroom} invert />}

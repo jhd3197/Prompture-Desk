@@ -39,6 +39,8 @@ export interface Capabilities {
   key_controls: boolean;
   provider_controls: boolean;
   alert_rules: boolean;
+  /** Local companion only: usage read from coding agents' own logs (/v1/tools). */
+  coding_tools?: boolean;
 }
 
 export interface HubInfo {
@@ -52,8 +54,39 @@ export interface HubInfo {
 
 /** Hubs from before capabilities were advertised could do everything. */
 export const HUB_CAPABILITIES: Capabilities = {
-  running_calls: true, projects: true, key_controls: true, provider_controls: true, alert_rules: true,
+  running_calls: true, projects: true, key_controls: true, provider_controls: true, alert_rules: true, coding_tools: false,
 };
+
+/** One row per model or project inside a coding agent's totals. */
+export interface ToolBreakdown { model?: string; project?: string | null; requests: number; tokens: number; cost_usd: number }
+
+/** A coding agent's usage for a period, read from its own logs by Prompture. */
+export interface ToolUsage {
+  agent: string;
+  name: string;
+  requests: number;
+  tokens: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  reasoning_tokens: number;
+  /** API-equivalent cost; "estimated" from model rates, "reported" by the tool, or "unknown". */
+  cost_usd: number;
+  cost_source: "reported" | "estimated" | "mixed" | "unknown";
+  last_used: string | null;
+  models: ToolBreakdown[];
+  projects: ToolBreakdown[];
+}
+
+export interface InstalledAgent { id: string; name: string; installed: boolean; runnable: boolean; usage: boolean }
+
+export interface Tools {
+  period: "day" | "week" | "month";
+  start: string;
+  agents: ToolUsage[];
+  installed: InstalledAgent[];
+}
 
 export type LocalProblem = { code: "not_installed" | "needs_upgrade" | "failed"; message: string };
 
@@ -91,6 +124,12 @@ export interface LimitWindow { limit: number | null; remaining: number | null; r
 
 export interface ProviderLimits {
   target: string;
+  /** "headers" for API rate limits; "plan" for a subscription's usage windows (percent units). */
+  source?: string;
+  /** For plans: the coding tool ("claude-code" | "codex") and the plan's name. */
+  tool?: string;
+  tool_name?: string;
+  plan?: string | null;
   current_headroom: number | null;
   current_window: string | null;
   observed_at: number;
@@ -198,7 +237,7 @@ function call<T>(method: string, path: string, body?: unknown): Promise<T> {
 
 /** Pages of Desk's window, dashboard first, then settings. */
 export type Page =
-  | "overview" | "activity" | "limits" | "alerts"
+  | "overview" | "activity" | "tools" | "limits" | "alerts"
   | "widget" | "appearance" | "providers" | "notifications" | "connection" | "about";
 
 export const hub = {
@@ -206,6 +245,7 @@ export const hub = {
   limits: () => call<Limits>("GET", "/v1/limits"),
   spend: (period: "day" | "week" | "month" = "day") => call<Spend>("GET", `/v1/spend?period=${period}`),
   alerts: () => call<Alert[]>("GET", "/v1/alerts?limit=50"),
+  tools: (period: "day" | "week" | "month" = "day") => call<Tools>("GET", `/v1/tools?period=${period}`),
   ackAlert: (id: number) => call<Alert>("POST", `/v1/alerts/${id}/ack`),
   pauseKey: (id: number) => call<KeyLimits>("POST", `/v1/keys/${id}/pause`),
   resumeKey: (id: number) => call<KeyLimits>("POST", `/v1/keys/${id}/resume`),
@@ -214,6 +254,20 @@ export const hub = {
   pauseProvider: (name: string) => call<{ provider: string; paused: boolean }>("POST", `/v1/providers/${encodeURIComponent(name)}/pause`),
   resumeProvider: (name: string) => call<{ provider: string; paused: boolean }>("POST", `/v1/providers/${encodeURIComponent(name)}/resume`),
 };
+
+const WINDOW_NAMES: Record<string, string> = { session_5h: "5-hour session", weekly: "weekly" };
+
+/** "session_5h" → "5-hour session", "weekly_opus" → "weekly Opus", "input_tokens" → "input tokens". */
+export function windowName(name: string | null | undefined): string {
+  if (!name) return "";
+  if (WINDOW_NAMES[name]) return WINDOW_NAMES[name];
+  const scoped = name.match(/^weekly_(.+)$/);
+  if (scoped) return `weekly ${scoped[1].charAt(0).toUpperCase()}${scoped[1].slice(1)}`;
+  return name.replace(/[_-]/g, " ");
+}
+
+/** Fallback names for plan targets from companions that don't send `tool_name`. */
+export const TOOL_NAMES: Record<string, string> = { claude: "Claude Code", "claude-code": "Claude Code", codex: "Codex" };
 
 export function tokens(v: number): string {
   if (v >= 1_000_000) return `${+(v / 1_000_000).toFixed(v >= 10_000_000 ? 0 : 2)}M`;

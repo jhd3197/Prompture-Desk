@@ -15,8 +15,8 @@ two modes behind one API:
 | | **Prompture on this PC** (no setup) | **prompture-hub** (optional upgrade) |
 |---|---|---|
 | Needs | Nothing — Desk uses your Prompture, or sets up its own | A running prompture-hub, paired once |
-| Sees | Every call your Prompture scripts and apps make on this machine | Every call routed through the hub — coding tools included — from any machine |
-| Shows | Usage per provider and project, rate-limit headroom, provider balances, calls as they finish | All of that, plus calls while they run, per-key caps, alert rules |
+| Sees | Every call your Prompture scripts and apps make on this machine, plus your coding tools (Claude Code, Codex, Kimi Code, …) | Every call routed through the hub — coding tools included — from any machine |
+| Shows | Usage per provider and project, rate-limit headroom, coding-tool usage and plan limits, provider balances, calls as they finish | All of that, plus calls while they run, per-key caps, alert rules |
 | Controls | Budgets and alerts inside Desk | Pause keys and providers, route overrides, acknowledge alerts |
 
 In local mode Desk starts `prompture companion` for you (a small localhost-only server that ships with
@@ -27,6 +27,19 @@ data folder, never touching yours, and checked for updates once a day. That take
 once. Attribute spend to projects with `PROMPTURE_PROJECT=name` or
 `get_tracker().project("name")` in your code.
 
+The companion also counts your **coding tools** from the logs they keep on this PC — Claude Code,
+Codex, Kimi Code, Gemini CLI, Qwen Code, OpenCode, Cline, Roo Code and Continue (Cursor and
+Antigravity are detected, but keep usage in their online accounts). **Desk › Coding tools** shows
+each one's calls, tokens, models and projects for today, the week or the month, which tools are
+installed, and which of them Prompture can also run. Only token counts, model names, times and
+folder names are read, never prompts or replies. Costs are what the same tokens would cost on the
+API — subscriptions don't bill per token, so **tokens** is usually the better metric for them.
+
+Plan limits show under **Limits › Coding plans**. Codex's come from its own logs. Claude Code doesn't
+write its 5-hour and weekly windows to disk; Prompture can read them the way Claude Code does, with
+Claude Code's own login, but only if you opt in with `PROMPTURE_CLAUDE_PLAN_USAGE=1`. Turn all
+coding-tool reading off by running the companion with `--no-coding-tools`.
+
 ## The widget
 
 Pick one style in **Desk › Widget**. All three show the same thing — each provider's usage
@@ -36,7 +49,7 @@ today against the daily budget you set for it, as a thin strip that turns amber 
 |---|---|
 | **Top capsule** (default) | An island at the top-centre of the screen that changes shape with its state: set-up prompt, connecting, live (today's total, each provider's logo and strip), a brief "call finished" note, and idle. Click to expand it into a per-provider panel. |
 | **Edge dock** | A floating column off the left or right edge. Hover a provider for its card (budget, rate window, Pause / Resume). Drag it by the total; it snaps to the nearer edge. |
-| **Tray chip** | No widget, just the tray icon — drawn with one bar per provider and an amber dot for alerts. |
+| **Tray chip** | No widget, just the tray icon — drawn with one bar per provider and an amber dot for alerts. (With the other styles the tray shows the app icon, greyed out while offline.) |
 
 **Visibility** decides whether the widget stays out: *Reveal on hover* (default) tucks the capsule
 into a sliver at the top edge and the dock into a tab of provider bars at its screen edge, and brings
