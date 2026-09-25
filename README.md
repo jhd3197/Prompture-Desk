@@ -4,6 +4,24 @@
   <p align="center">What your <a href="https://github.com/jhd3197/prompture">Prompture</a> apps are spending, in the tray: usage per provider and project, rate limits and balances — plus live calls, alerts and controls with <a href="https://github.com/jhd3197/prompture-hub">prompture-hub</a>.</p>
 </p>
 
+<div align="center">
+
+English | [Español](docs/README.es.md) | [中文版](docs/README.zh-CN.md)
+
+![Windows](https://img.shields.io/badge/Windows-0078D4?style=for-the-badge&logo=windows&logoColor=white)
+![macOS](https://img.shields.io/badge/macOS-000000?style=for-the-badge&logo=apple&logoColor=white)
+![Linux](https://img.shields.io/badge/Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)
+
+[![GitHub Stars](https://img.shields.io/github/stars/jhd3197/Prompture-Desk?style=flat-square&color=f5c542)](https://github.com/jhd3197/Prompture-Desk/stargazers)
+[![Downloads](https://img.shields.io/github/downloads/jhd3197/Prompture-Desk/total?style=flat-square)](https://github.com/jhd3197/Prompture-Desk/releases)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square)](LICENSE)
+[![Version](https://img.shields.io/github/v/release/jhd3197/Prompture-Desk?style=flat-square&color=8b7ff6&label=version)](https://github.com/jhd3197/Prompture-Desk/releases)
+[![Tauri](https://img.shields.io/badge/tauri-2-24C8D8.svg?style=flat-square&logo=tauri&logoColor=white)](https://tauri.app)
+[![Rust](https://img.shields.io/badge/rust-1.88+-DEA584.svg?style=flat-square&logo=rust&logoColor=black)](https://rust-lang.org)
+[![React](https://img.shields.io/badge/react-18-61DAFB.svg?style=flat-square&logo=react&logoColor=black)](https://reactjs.org)
+
+</div>
+
 <p align="center">
   <img src="docs/screenshots/capsule.png" width="380" alt="Top capsule, expanded: per-provider strips and today's usage" />
   <img src="docs/screenshots/dock.png" width="250" alt="Edge dock with a provider's card open" />

@@ -298,11 +298,38 @@ fn package() -> String {
     std::env::var("PROMPTURE_DESK_PACKAGE").ok().filter(|p| !p.trim().is_empty()).unwrap_or_else(|| PACKAGE.into())
 }
 
+/// uv links `cpython-3.12-…` to the patch release it downloads. Windows refuses
+/// that junction on some PCs (os error 448, e.g. with OneDrive Files On-Demand),
+/// after the download itself has landed.
+fn link_refused(log: &str) -> bool {
+    log.contains("minor version link") || log.contains("os error 448")
+}
+
+/// The Python uv downloaded into Desk's folder, by its real (patch) path, so
+/// installing with it needs no junction.
+fn downloaded_python(dir: &Path) -> Option<PathBuf> {
+    let prefix = format!("cpython-{PYTHON}.");
+    std::fs::read_dir(dir.join("python"))
+        .ok()?
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().starts_with(&prefix))
+        .map(|e| e.path().join(if cfg!(windows) { "python.exe" } else { "bin/python3" }))
+        .filter(|p| p.is_file())
+        .max()
+}
+
 /// Install (or reinstall) Desk's own Prompture.
 async fn install_managed(uv: PathBuf, dir: PathBuf) -> Result<(), LocalError> {
     let pkg = package();
     let (ok, log) = tauri::async_runtime::spawn_blocking(move || {
-        run(uv_command(&uv, &dir, &["tool", "install", "--force", "--python", PYTHON, &pkg]), SETUP_TIMEOUT)
+        let install = |python: &str| {
+            run(uv_command(&uv, &dir, &["tool", "install", "--force", "--python", python, &pkg]), SETUP_TIMEOUT)
+        };
+        let (ok, log) = install(PYTHON);
+        match downloaded_python(&dir) {
+            Some(python) if !ok && link_refused(&log) => install(&python.to_string_lossy()),
+            _ => (ok, log),
+        }
     })
     .await
     .unwrap_or((false, String::new()));
@@ -611,5 +638,21 @@ mod tests {
     fn tail_keeps_the_last_lines() {
         assert_eq!(tail("a\n\nb\nc\nd\n", 2), "c\nd");
         assert_eq!(tail("only", 4), "only");
+    }
+
+    #[test]
+    fn refused_link_falls_back_to_the_downloaded_python() {
+        assert!(link_refused("error: Failed to create Python minor version link directory"));
+        assert!(!link_refused("error: Failed to fetch: https://pypi.org"));
+
+        let dir = std::env::temp_dir().join(format!("desk-py-{}", std::process::id()));
+        let exe = if cfg!(windows) { "python.exe" } else { "bin/python3" };
+        let real = dir.join("python").join(format!("cpython-{PYTHON}.14-windows-x86_64-none"));
+        std::fs::create_dir_all(real.join(exe).parent().unwrap()).unwrap();
+        std::fs::write(real.join(exe), "").unwrap();
+        // The minor link itself (here a plain folder) is never picked.
+        std::fs::create_dir_all(dir.join("python").join(format!("cpython-{PYTHON}-windows-x86_64-none"))).unwrap();
+        assert_eq!(downloaded_python(&dir), Some(real.join(exe)));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
