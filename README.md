@@ -8,10 +8,6 @@
   <img src="docs/screenshots/capsule.png" width="380" alt="Top capsule, expanded: per-provider strips and today's usage" />
   <img src="docs/screenshots/dock.png" width="250" alt="Edge dock with a provider's card open" />
 </p>
-<p align="center">
-  <img src="docs/screenshots/desk.png" width="480" alt="Desk: overview dashboard" />
-  <img src="docs/screenshots/settings.png" width="480" alt="Settings: providers, budgets and order" />
-</p>
 
 Prompture Desk is a small cross-platform desktop app (Tauri 2: Windows, macOS, Linux). It works in
 two modes behind one API:
