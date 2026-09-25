@@ -1,6 +1,7 @@
 import {
   currentMonitor, cursorPosition, getCurrentWindow, LogicalSize, PhysicalPosition, primaryMonitor,
 } from "@tauri-apps/api/window";
+import { ArrowUpRight, Check, TriangleAlert } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { Strip, useAppearance } from "./components/ui";
@@ -218,7 +219,7 @@ function Island({ d, settings }: { d: DeskState; settings: Settings }) {
           {warn && <span className="dot wait" title={warn} />}
         </div>
         <div {...layer("done")}>
-          <span className="isl-check">✓</span>
+          <span className="isl-check"><Check size={11} strokeWidth={3} aria-hidden /></span>
           {doneProvider && <ProviderLogo id={doneProvider} size={16} />}
           <span className="isl-text">
             {doneProvider ? providerName(doneProvider) : "Call"} {done?.status === "error" ? "failed" : "finished"}
@@ -243,10 +244,10 @@ function Island({ d, settings }: { d: DeskState; settings: Settings }) {
               <span className="num">{r.value}</span>
             </div>
           ))}
-          {warn && <div className="warn-line">▲ {warn}</div>}
+          {warn && <div className="warn-line"><TriangleAlert size={12} aria-hidden /> {warn}</div>}
           <div className="expand-foot">
             <span>{phaseTitle(d, p)}</span>
-            <button className="link-btn" onClick={e => { e.stopPropagation(); desk.open("overview"); }}>Open Desk ↗</button>
+            <button className="link-btn" onClick={e => { e.stopPropagation(); desk.open("overview"); }}>Open Desk <ArrowUpRight size={12} aria-hidden /></button>
           </div>
         </div>
       </div>
