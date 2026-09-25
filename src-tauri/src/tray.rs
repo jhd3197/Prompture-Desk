@@ -78,7 +78,7 @@ pub fn render(summary: &TraySummary) -> Vec<u8> {
     let mut px = if offline || bars.is_empty() { app_icon().to_vec() } else { vec![0u8; (SIZE * SIZE * 4) as usize] };
     if offline {
         // Grey, dimmed: the same icon, clearly not live.
-        for p in px.chunks_exact_mut(4) {
+        for p in px.as_chunks_mut::<4>().0 {
             let luma = (0.299 * p[0] as f64 + 0.587 * p[1] as f64 + 0.114 * p[2] as f64) * 0.6;
             p[0] = luma as u8;
             p[1] = luma as u8;
@@ -213,7 +213,7 @@ mod tests {
         // Offline: the app icon in grey, bars and alert ignored.
         let offline = render(&TraySummary { state: "offline".into(), bars: vec![bar(0.9, "ok")], alert: true, ..Default::default() });
         let icon = app_icon();
-        for (o, i) in offline.chunks_exact(4).zip(icon.chunks_exact(4)) {
+        for (o, i) in offline.as_chunks::<4>().0.iter().zip(icon.as_chunks::<4>().0) {
             assert!(o[0] == o[1] && o[1] == o[2]);
             assert_eq!(o[3], i[3]);
         }
