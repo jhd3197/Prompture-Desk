@@ -2,14 +2,16 @@
 // through `save`; changes apply right away.
 
 import { getVersion } from "@tauri-apps/api/app";
-import { ArrowUpRight, GripVertical } from "lucide-react";
+import { ArrowUpRight, Download, GripVertical, LoaderCircle, RefreshCw } from "lucide-react";
 import { emit } from "@tauri-apps/api/event";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Mark } from "../components/Mark";
+import { StarCard } from "../components/StarPrompt";
 import { ACCENT_HUES, Segmented, Toggle } from "../components/ui";
 import { type ProviderPref, type Settings, desk, parseCount, tokens } from "../lib/hub";
 import { providerIds, withNewProviders } from "../lib/model";
 import { ProviderLogo, providerName } from "../lib/providers";
+import { progress, updater, usePrompture, useUpdater } from "../lib/updater";
 import type { DeskState } from "../lib/useDesk";
 
 export type Save = (patch: Partial<Settings>) => void;
@@ -57,21 +59,21 @@ export function WidgetSection({ s, save }: { s: Settings; save: Save }) {
           ))}
         </div>
       </Field>
-      <Field title="Show usage as" hint="Price is the default. Tokens suits flat-rate plans.">
+      <Field title="Show usage as" hint="Tokens suit flat-rate plans.">
         <Segmented label="Show usage as" value={s.metric} options={[["price", "Price"], ["tokens", "Tokens"]]} onChange={v => save({ metric: v })} />
       </Field>
       {s.widget_style !== "tray" && (
-        <Field title="Visibility" hint="Reveal on hover tucks the widget into a sliver at the screen edge.">
+        <Field title="Visibility" hint="Tucks into the screen edge until hovered.">
           <Segmented label="Visibility" value={s.visibility} options={[["always", "Always"], ["hover", "Reveal on hover"]]} onChange={v => save({ visibility: v })} />
         </Field>
       )}
       {s.widget_style === "dock" && (
-        <Field title="Dock button opens" hint="The Prompture Desk button at the bottom of the dock.">
+        <Field title="Dock button opens">
           <Segmented label="Dock button opens" value={s.dock_button ?? "overview"} options={[["overview", "Overview"], ["activity", "Activity"], ["tools", "Coding tools"], ["widget", "Settings"]]} onChange={v => save({ dock_button: v })} />
         </Field>
       )}
       {s.widget_style === "dock" && (
-        <Field title="Dock edge" hint="You can also drag the dock by its total; it snaps to the nearer edge.">
+        <Field title="Dock edge" hint="Or drag the dock by its total.">
           <Segmented label="Dock edge" value={s.dock_edge} options={[["left", "Left"], ["right", "Right"]]} onChange={v => save({ dock_edge: v })} />
         </Field>
       )}
@@ -79,7 +81,7 @@ export function WidgetSection({ s, save }: { s: Settings; save: Save }) {
         <Segmented label="Detail level" value={s.detail} options={[["compact", "Compact"], ["auto", "Per platform"], ["detailed", "Detailed"]]} onChange={v => save({ detail: v })} />
       </Field>
       <div>
-        <ToggleRow label="Show alerts in widget" sub="Amber dot and line when a limit is close" on={s.show_alerts} onChange={v => save({ show_alerts: v })} />
+        <ToggleRow label="Show alerts in widget" sub="When a limit is close" on={s.show_alerts} onChange={v => save({ show_alerts: v })} />
         <ToggleRow label="Always on top" sub="Stays above full-size windows" on={s.always_on_top} onChange={v => save({ always_on_top: v })} />
         <ToggleRow label="Hide during full-screen apps" sub="Games, video, presentations" on={s.hide_fullscreen} onChange={v => save({ hide_fullscreen: v })} />
         <ToggleRow label="Launch at login" sub="Starts with Windows / macOS" on={s.launch_at_login} onChange={v => save({ launch_at_login: v })} />
@@ -104,6 +106,9 @@ export function AppearanceSection({ s, save }: { s: Settings; save: Save }) {
       </Field>
       <Field title="Widget opacity">
         <Segmented label="Widget opacity" value={s.opacity} options={[[100, "100%"], [90, "90%"], [80, "80%"]]} onChange={v => save({ opacity: v })} />
+      </Field>
+      <Field title="Language" hint="System follows your OS language.">
+        <Segmented label="Language" value={s.language ?? "system"} options={[["system", "System"], ["en", "English"], ["es", "Español"], ["zh-CN", "中文"]]} onChange={v => save({ language: v })} />
       </Field>
     </>
   );
@@ -157,50 +162,80 @@ function BudgetInput({ pref, metric, onCommit }: { pref: ProviderPref; metric: S
 
 export function ProvidersSection({ s, save, d }: { s: Settings; save: Save; d: DeskState }) {
   const prefs = withNewProviders(s, providerIds(s, d.spend, d.limits, d.running));
-  const [drag, setDrag] = useState<number | null>(null);
   const put = (next: ProviderPref[]) => save({ providers: next });
-  const move = (from: number, to: number) => {
-    const next = [...prefs];
-    const [item] = next.splice(from, 1);
-    next.splice(to, 0, item);
-    put(next);
+  // Reordering uses pointer events: the webview's file-drop handling swallows
+  // HTML drag and drop. The order is local while dragging and saved on release.
+  const listRef = useRef<HTMLDivElement>(null);
+  const [dragging, setDragging] = useState<string | null>(null);
+  const [order, setOrder] = useState<string[] | null>(null);
+  const shown = order ? order.map(id => prefs.find(p => p.id === id)!).filter(Boolean) : prefs;
+
+  const onGripDown = (e: React.PointerEvent, id: string) => {
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setDragging(id);
+    setOrder(prefs.map(p => p.id));
   };
+  const onGripMove = (e: React.PointerEvent) => {
+    if (!dragging || !order || !listRef.current) return;
+    const rows = Array.from(listRef.current.children) as HTMLElement[];
+    // The row under the pointer takes the dragged one's place.
+    const below = rows.findIndex(r => e.clientY < r.getBoundingClientRect().bottom);
+    const to = below === -1 ? rows.length - 1 : below;
+    const from = order.indexOf(dragging);
+    if (to === from) return;
+    const next = [...order];
+    next.splice(from, 1);
+    next.splice(to, 0, dragging);
+    setOrder(next);
+  };
+  const onGripUp = () => {
+    if (order && order.join() !== prefs.map(p => p.id).join()) put(shown);
+    setDragging(null);
+    setOrder(null);
+  };
+
   return (
-    <Field title="Providers in the widget" hint="Toggle what shows and drag to reorder. The budget is the daily cap each strip fills against.">
-      {prefs.length === 0 ? (
-        <div className="s-empty">Providers appear here once calls go through {d.mode === "hub" ? "the hub" : "Prompture"}.</div>
-      ) : (
-        <div className="s-list">
-          {prefs.map((p, i) => {
-            const row = d.rows.find(r => r.id === p.id);
-            return (
-              <div key={p.id} className={`s-list-row ${drag === i ? "dragging" : ""}`} draggable
-                onDragStart={() => setDrag(i)} onDragEnd={() => setDrag(null)}
-                onDragOver={e => { e.preventDefault(); if (drag != null && drag !== i) { move(drag, i); setDrag(i); } }}>
-                <GripVertical className="s-grip" size={16} aria-hidden />
-                <ProviderLogo id={p.id} size={28} />
-                <span className="s-list-name">{providerName(p.id)}
-                  {row && <small>{row.value} today</small>}
-                </span>
-                <BudgetInput pref={p} metric={s.metric} onCommit={np => put(prefs.map(x => (x.id === np.id ? np : x)))} />
-                <Toggle label={`Show ${providerName(p.id)}`} on={p.visible} onChange={v => put(prefs.map(x => (x.id === p.id ? { ...x, visible: v } : x)))} />
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </Field>
+    <>
+      <ToggleRow label="Hide unused providers" sub="Only show providers used today" on={s.hide_unused ?? true} onChange={v => save({ hide_unused: v })} />
+      <Field title="Providers in the widget" hint="Drag to reorder. Budgets are daily.">
+        {prefs.length === 0 ? (
+          <div className="s-empty">Providers appear here once calls go through {d.mode === "hub" ? "the hub" : "Prompture"}.</div>
+        ) : (
+          <div className="s-list" ref={listRef}>
+            {shown.map(p => {
+              const row = d.rows.find(r => r.id === p.id);
+              const used = row && (row.tokens > 0 || row.spendUsd > 0);
+              return (
+                <div key={p.id} className={`s-list-row ${dragging === p.id ? "dragging" : ""}`}>
+                  <span className="s-grip" onPointerDown={e => onGripDown(e, p.id)} onPointerMove={onGripMove}
+                    onPointerUp={onGripUp} onPointerCancel={onGripUp} title="Drag to reorder">
+                    <GripVertical size={16} aria-hidden />
+                  </span>
+                  <ProviderLogo id={p.id} size={28} />
+                  <span className="s-list-name">{providerName(p.id)}
+                    <small>{used ? `${row.value} today` : "Not used today"}</small>
+                  </span>
+                  <BudgetInput pref={p} metric={s.metric} onCommit={np => put(prefs.map(x => (x.id === np.id ? np : x)))} />
+                  <Toggle label={`Show ${providerName(p.id)}`} on={p.visible} onChange={v => put(prefs.map(x => (x.id === p.id ? { ...x, visible: v } : x)))} />
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Field>
+    </>
   );
 }
 
 export function AlertsSection({ s, save }: { s: Settings; save: Save }) {
   return (
     <>
-      <Field title="Warn at" hint="Strips turn amber past this share of a budget or rate window.">
+      <Field title="Warn at" hint="Strips turn amber past this.">
         <Segmented label="Warn at" value={s.warn_at} options={[[70, "70%"], [85, "85%"], [95, "95%"]]} onChange={v => save({ warn_at: v })} />
       </Field>
       <div>
-        <ToggleRow label="Notify on hub alerts" sub="From the alert rules set in the hub dashboard" on={s.notify_alerts} onChange={v => save({ notify_alerts: v })} />
+        <ToggleRow label="Notify on hub alerts" sub="From the hub's alert rules" on={s.notify_alerts} onChange={v => save({ notify_alerts: v })} />
         <ToggleRow label="Notify when a key or provider is paused" sub="Including hitting its spend cap" on={s.notify_paused} onChange={v => save({ notify_paused: v })} />
         <ToggleRow label="Notify when long calls finish" sub="Calls over 30s" on={s.notify_long_calls} onChange={v => save({ notify_long_calls: v })} />
         <ToggleRow label="Notify on failed calls" sub="Every call that ends in an error" on={s.notify_errors} onChange={v => save({ notify_errors: v })} />
@@ -238,8 +273,7 @@ export function ConnectionSection({ s, save, d }: { s: Settings; save: Save; d: 
   const dot = d.status.state === "live" ? "live" : d.status.state === "unauthorized" || d.status.state === "idle" ? "off" : "wait";
   return (
     <>
-      <Field title={isLocal ? "Prompture on this PC" : "Hub address"}
-        hint={isLocal ? "Usage from the Prompture ledger on this machine, served by `prompture companion`." : undefined}>
+      <Field title={isLocal ? "Prompture on this PC" : "Hub address"}>
         <div className="row" style={{ gap: 10 }}>
           <div className="s-addr num">{active?.url ?? "Not connected"}</div>
           <span className="row" style={{ gap: 6 }}><span className={`dot ${dot}`} /><span className="s-muted">{d.status.state}</span></span>
@@ -249,8 +283,7 @@ export function ConnectionSection({ s, save, d }: { s: Settings; save: Save; d: 
       </Field>
       {isLocal && (
         <div className="s-empty" style={{ textAlign: "left" }}>
-          <strong>Add a prompture-hub to see more.</strong> A hub sees every call routed through it — coding tools
-          included — and adds calls while they run, per-key caps, alert rules and pause / route controls.
+          A prompture-hub adds running calls, per-key caps, alert rules and controls.
         </div>
       )}
       {s.hubs.filter(h => h.id !== s.active_hub).length > 0 && (
@@ -274,30 +307,88 @@ export function ConnectionSection({ s, save, d }: { s: Settings; save: Save; d: 
         {active && !isLocal && <button className="s-btn ghost" onClick={() => desk.removeHub(active.id)}>Forget this hub</button>}
       </div>
       {switching && <span className="s-field-hint">{switching}</span>}
-      <Field title="Refresh every" hint="Live calls stream continuously; this is how often spend and limits are re-read.">
+      <Field title="Refresh every" hint="How often spend and limits are re-read.">
         <Segmented label="Refresh every" value={s.refresh_secs} options={[[1, "1s"], [5, "5s"], [15, "15s"]]} onChange={v => save({ refresh_secs: v })} />
       </Field>
     </>
   );
 }
 
-export function AboutSection() {
+export function AboutSection({ s, save, d }: { s: Settings; save: Save; d: DeskState }) {
   const [version, setVersion] = useState("");
   useEffect(() => { getVersion().then(setVersion).catch(() => undefined); }, []);
   const platform = navigator.userAgent.includes("Windows") ? "Windows" : navigator.userAgent.includes("Mac") ? "macOS" : "Linux";
   return (
     <>
-      <Mark size={56} className="s-about-mark" />
-      <div className="s-about">
-        <span className="s-about-name">Prompture Desk</span>
-        <span className="num s-muted">v{version} · {platform}</span>
+      <div className="row" style={{ gap: 14 }}>
+        <Mark size={48} className="s-about-mark" />
+        <div className="s-about">
+          <span className="s-about-name">Prompture Desk</span>
+          <span className="num s-muted">v{version} · {platform}</span>
+        </div>
       </div>
-      <p className="s-muted" style={{ margin: 0, fontSize: 13 }}>
-        What your Prompture apps are spending, built on <strong>Prompture</strong>. Provider logos from LobeHub Icons (MIT), interface icons from Lucide (ISC).
-      </p>
-      <p className="s-muted" style={{ margin: 0, fontSize: 13 }}>
-        Automatic updates will arrive with signed releases. For now, install new builds over this one.
+      <StarCard />
+      <DeskUpdates />
+      {d.mode === "local" && <PromptureUpdates s={s} save={save} d={d} />}
+      <p className="s-muted" style={{ margin: 0, fontSize: 12 }}>
+        Built on Prompture. Provider logos from LobeHub Icons (MIT), interface icons from Lucide (ISC).
       </p>
     </>
+  );
+}
+
+/** Desk's own updates: check, download with progress, restart. */
+function DeskUpdates() {
+  const u = useUpdater();
+  const pct = progress(u);
+  const line = u.status === "available" ? `Prompture Desk ${u.version} is available.`
+    : u.status === "downloading" ? (pct != null ? `Downloading update… ${pct}%` : "Downloading update…")
+      : u.status === "ready" ? "Restart to finish updating."
+        : u.status === "checking" ? "Checking…"
+          : u.status === "error" ? u.error ?? "Update check failed."
+            : u.status === "current" ? "You're on the latest version." : null;
+  return (
+    <Field title="Updates">
+      <div className="s-update">
+        <span className={`grow ${u.status === "error" ? "s-error" : "s-muted"}`}>{line}</span>
+        {u.status === "available" && <button className="s-btn primary" onClick={() => updater.install()}><Download size={14} aria-hidden /> Download &amp; install</button>}
+        {u.status === "ready" && <button className="s-btn primary" onClick={() => updater.restart()}><RefreshCw size={14} aria-hidden /> Restart now</button>}
+        {(u.status === "idle" || u.status === "current" || u.status === "error" || u.status === "checking") && (
+          <button className="s-btn" disabled={u.status === "checking"} onClick={() => updater.check(false)}>Check for updates</button>
+        )}
+      </div>
+    </Field>
+  );
+}
+
+/** The Prompture behind local mode: its version, and how Desk keeps its own copy current. */
+function PromptureUpdates({ s, save, d }: { s: Settings; save: Save; d: DeskState }) {
+  const p = usePrompture(true, `${d.status.state}|${s.prompture_updates}`);
+  const st = p.status;
+  const line = !st?.version ? "Not running"
+    : st.update_available ? `Prompture ${st.latest} is available.`
+      : st.latest ? "Up to date" : null;
+  return (
+    <Field title="Prompture updates">
+      <div className="s-update">
+        <span className="grow stack" style={{ gap: 2 }}>
+          <span className="num">{st?.version ? `v${st.version}` : "—"}{st?.source && <span className="s-muted"> · {st.source === "desk" ? "Desk's own copy" : "Installed by you"}</span>}</span>
+          {line && <span className="s-muted" style={{ fontSize: 12 }}>{line}</span>}
+          {st?.update_available && st.source === "system" && <span className="s-muted" style={{ fontSize: 12 }}>Update with pipx upgrade prompture.</span>}
+          {p.error && <span className="s-error" style={{ fontSize: 12, whiteSpace: "pre-wrap" }}>{p.error}</span>}
+        </span>
+        {st?.update_available && st.source === "desk" ? (
+          <button className="s-btn primary" disabled={!!p.busy} onClick={p.update}>
+            {p.busy === "updating" ? <LoaderCircle size={14} className="spin" aria-hidden /> : <Download size={14} aria-hidden />} Update now
+          </button>
+        ) : (
+          <button className="s-btn" disabled={!!p.busy || s.prompture_updates === "off"} onClick={p.recheck}>
+            {p.busy === "checking" ? "Checking…" : "Check for updates"}
+          </button>
+        )}
+      </div>
+      <Segmented label="Prompture updates" value={s.prompture_updates ?? "auto"}
+        options={[["auto", "Automatic"], ["ask", "Ask"], ["off", "Off"]]} onChange={v => save({ prompture_updates: v })} />
+    </Field>
   );
 }

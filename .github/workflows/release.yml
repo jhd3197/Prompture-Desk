@@ -158,18 +158,38 @@ jobs:
       - name: Install npm deps
         run: npm ci
 
+      # Signed updater artifacts are built ONLY when the updater signing key is
+      # a repository secret. Without it the release builds exactly as before,
+      # just with no in-app update path. See docs/updater-key-custody.md.
+      - name: Detect updater signing key
+        id: updater
+        shell: bash
+        env:
+          KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -n "$KEY" ]; then
+            echo "sign=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "sign=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::TAURI_SIGNING_PRIVATE_KEY not set — building WITHOUT updater artifacts (docs/updater-key-custody.md)."
+          fi
+
       # tauri build runs `npm run fetch:uv` first (beforeBuildCommand), which
       # downloads and checksums uv for the target — a lipo'd pair on macOS.
       - name: Build + bundle, attach to draft release
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # tauri-action signs the updater artifacts and uploads latest.json when set.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ needs.prepare.outputs.tag }}
           releaseName: 'Prompture Desk ${{ needs.prepare.outputs.tag }}'
           releaseDraft: true
           prerelease: false
-          args: ${{ matrix.platform.args }}
+          # createUpdaterArtifacts comes from a config overlay, only when signing.
+          args: ${{ matrix.platform.args }}${{ steps.updater.outputs.sign == 'true' && ' --config src-tauri/updater-release.conf.json' || '' }}
 
       # Portable build: Tauri has no portable bundle target, so zip the
       # unpacked exe with the uv it sets Prompture up with.

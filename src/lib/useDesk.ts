@@ -13,6 +13,7 @@ import {
   type Alert, type Capabilities, type LiveEvent, type LiveStatus, type Limits, type Settings, type Spend,
   HUB_CAPABILITIES, desk, hub,
 } from "./hub";
+import { tr } from "./i18n";
 import { type ProviderRow, providerRows, totalLabel } from "./model";
 
 /** Finished calls kept for the activity sparkline. */
@@ -94,7 +95,7 @@ export function useDesk({ primary }: { primary: boolean }): DeskState {
     if (!primary) return;
     let granted = await isPermissionGranted();
     if (!granted) granted = (await requestPermission()) === "granted";
-    if (granted) sendNotification({ title, body });
+    if (granted) sendNotification({ title: tr(title), body: tr(body) });
     if (settingsRef.current?.play_sound) desk.playAlertSound().catch(() => undefined);
   }, [primary]);
 
@@ -219,7 +220,7 @@ export function useDesk({ primary }: { primary: boolean }): DeskState {
       // Bars only when the tray icon is the widget; otherwise it stays the app icon.
       bars: settings.widget_style !== "tray" ? [] : visible.slice(0, 5).map(r => ({ fraction: Math.min(1, r.pct / 100), tone: r.tone })),
       alert: settings.show_alerts && (open > 0 || warn),
-      tooltip: `Prompture Desk — ${parts.join(" · ")}`,
+      tooltip: `Prompture Desk — ${parts.map(tr).join(" · ")}`,
     }).catch(() => undefined);
   }, [primary, settings, paired, status.state, alerts, rows, spend, runningList.length]);
 

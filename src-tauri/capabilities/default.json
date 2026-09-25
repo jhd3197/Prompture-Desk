@@ -17,6 +17,8 @@
     "core:window:allow-set-ignore-cursor-events",
     "notification:default",
     "opener:allow-open-url",
-    "window-state:default"
+    "window-state:default",
+    "updater:default",
+    "process:allow-restart"
   ]
 }

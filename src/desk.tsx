@@ -4,17 +4,19 @@
 import { listen } from "@tauri-apps/api/event";
 import {
   Activity, AppWindow, ArrowUpRight, Bell, Gauge, Info, Layers, LayoutDashboard, type LucideIcon, Palette, Plug,
-  SquareTerminal, TriangleAlert, X,
+  Settings as Gear, SquareTerminal, TriangleAlert, X, ChevronLeft,
 } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { ActivityHeatmap } from "./components/Heatmap";
 import { Mark } from "./components/Mark";
+import { StarButton, StarCard } from "./components/StarPrompt";
 import { Sparkline, Strip, ago, useAppearance } from "./components/ui";
 import { type Page, type Settings, type Spend, count, desk, hub, tokens, usd } from "./lib/hub";
 import { activeRows, totalLabel, warningLine } from "./lib/model";
 import { ProviderLogo, providerName, providerOf } from "./lib/providers";
+import { progress, updater, usePrompture, useUpdater } from "./lib/updater";
 import { type DeskState, useDesk } from "./lib/useDesk";
 import "./styles/app.css";
 import { Onboarding } from "./views/Onboarding";
@@ -27,11 +29,10 @@ import { AlertsView, HeadroomView } from "./views/Views";
 
 const DASHBOARD: Array<[Page, string, LucideIcon]> = [
   ["overview", "Overview", LayoutDashboard], ["activity", "Activity", Activity], ["tools", "Coding tools", SquareTerminal],
-  ["limits", "Limits", Gauge],
-  ["alerts", "Alerts", TriangleAlert],
+  ["providers", "Providers", Layers], ["limits", "Limits", Gauge], ["alerts", "Alerts", TriangleAlert],
 ];
 const SETTINGS: Array<[Page, string, LucideIcon]> = [
-  ["widget", "Widget", AppWindow], ["appearance", "Appearance", Palette], ["providers", "Providers", Layers],
+  ["widget", "Widget", AppWindow], ["appearance", "Appearance", Palette],
   ["notifications", "Notifications", Bell], ["connection", "Connection", Plug], ["about", "About", Info],
 ];
 const TITLES = Object.fromEntries([...DASHBOARD, ...SETTINGS].map(([p, t]) => [p, t])) as Record<Page, string>;
@@ -74,7 +75,7 @@ function Overview({ d, s, go }: { d: DeskState; s: Settings; go: (p: Page) => vo
   const { week, month } = usePeriods(d.paired);
   const today = d.spend?.total;
   const total = totalLabel(s, d.spend);
-  const rows = activeRows(d.rows);
+  const rows = activeRows(d.rows, s);
   const warn = s.show_alerts ? warningLine(d.alerts, d.rows, s) : null;
   const projects = [...(d.spend?.by_project ?? [])].sort((a, b) => b.cost_usd - a.cost_usd || b.tokens - a.tokens).slice(0, 5);
   const projectMax = Math.max(1e-9, ...projects.map(p => (s.metric === "tokens" ? p.tokens : p.cost_usd)));
@@ -108,8 +109,7 @@ function Overview({ d, s, go }: { d: DeskState; s: Settings; go: (p: Page) => vo
           </header>
           {rows.length === 0 ? (
             <p className="d-empty">
-              No calls yet today. Your coding tools (Claude Code, Codex, Kimi Code, …) and anything your code runs through Prompture show up here — tag your code with
-              <code className="mono"> PROMPTURE_PROJECT=name</code> to see spend per project.
+              No calls yet today. Set <code className="mono">PROMPTURE_PROJECT=name</code> to split spend by project.
             </p>
           ) : (
             <div className="d-prov">
@@ -177,11 +177,60 @@ function Overview({ d, s, go }: { d: DeskState; s: Settings; go: (p: Page) => vo
   );
 }
 
+// ---------------------------------------------------------------- updates
+
+/** Desk's update checks: at launch when due, then hourly (Desk lives in the tray for days). */
+function useUpdateChecks() {
+  useEffect(() => {
+    updater.checkIfDue();
+    const t = window.setInterval(() => updater.checkIfDue(), 60 * 60 * 1000);
+    return () => window.clearInterval(t);
+  }, []);
+}
+
+/** A small prompt at the foot of the sidebar: a Desk update, or (in "ask" mode) a Prompture one. */
+function UpdatePrompt({ d, s }: { d: DeskState; s: Settings }) {
+  const u = useUpdater();
+  const ask = d.mode === "local" && s.prompture_updates === "ask";
+  const p = usePrompture(ask, d.status.state);
+  const [hidePrompture, setHidePrompture] = useState(false);
+
+  if (!u.dismissed && (u.status === "available" || u.status === "downloading" || u.status === "ready")) {
+    const pct = progress(u);
+    return (
+      <div className="d-update">
+        <div className="d-update-row">
+          <span>{u.status === "ready" ? "Restart to finish updating." : `Update to ${u.version}`}</span>
+          {u.status === "available" && <button className="d-update-x" onClick={() => updater.dismiss()} title="Not now"><X size={13} /></button>}
+        </div>
+        {u.status === "downloading" && <div className="d-update-bar"><span style={{ width: `${pct ?? 30}%` }} /></div>}
+        {u.status === "available" && <button className="d-link" onClick={() => updater.install()}>Download &amp; install</button>}
+        {u.status === "ready" && <button className="d-link" onClick={() => updater.restart()}>Restart now</button>}
+      </div>
+    );
+  }
+  const st = p.status;
+  if (ask && !hidePrompture && st?.update_available && st.source === "desk") {
+    return (
+      <div className="d-update">
+        <div className="d-update-row">
+          <span>{`Prompture ${st.latest} is available.`}</span>
+          {!p.busy && <button className="d-update-x" onClick={() => setHidePrompture(true)} title="Not now"><X size={13} /></button>}
+        </div>
+        {p.error && <span className="s-error">{p.error}</span>}
+        <button className="d-link" disabled={!!p.busy} onClick={p.update}>{p.busy === "updating" ? "Updating Prompture…" : "Update now"}</button>
+      </div>
+    );
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------- window
 
 function DeskWindow() {
   const d = useDesk({ primary: true });
   useAppearance(d.settings);
+  useUpdateChecks();
   const [page, setPage] = useState<Page>("overview");
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -225,15 +274,26 @@ function DeskWindow() {
         <div className="d-brand" data-tauri-drag-region>
           <span className="d-brand-row" data-tauri-drag-region>
             <Mark size={26} className="d-logo" />
-            <span className="d-brand-name" data-tauri-drag-region>Prompture Desk</span>
+            <span className="d-brand-name grow" data-tauri-drag-region>Prompture Desk</span>
+            <StarButton />
           </span>
         </div>
-        <span className="d-group">Dashboard</span>
-        {nav(DASHBOARD)}
-        <span className="d-group">Settings</span>
-        {nav(SETTINGS)}
+        {isSettings && !onboarding ? (
+          <>
+            <button className="d-back" onClick={() => setPage("overview")}><ChevronLeft size={16} aria-hidden /> Settings</button>
+            {nav(SETTINGS)}
+          </>
+        ) : nav(DASHBOARD)}
         <span className="grow" data-tauri-drag-region />
-        {d.mode === "hub" && <button className="d-link d-side-link" onClick={() => desk.openDashboard()}>Hub dashboard <ArrowUpRight size={13} aria-hidden /></button>}
+        <UpdatePrompt d={d} s={s} />
+        {!isSettings && <StarCard compact />}
+        {d.mode === "hub" && !isSettings && <button className="d-link d-side-link" onClick={() => desk.openDashboard()}>Hub dashboard <ArrowUpRight size={13} aria-hidden /></button>}
+        {!isSettings && (
+          <button className={`s-nav d-gear`} onClick={() => { setAdding(false); setPage("widget"); }}>
+            <Gear className="s-nav-glyph" size={16} strokeWidth={1.75} aria-hidden />
+            <span className="grow">Settings</span>
+          </button>
+        )}
       </nav>
       <div className="s-main">
         <header className="s-head" data-tauri-drag-region>
@@ -257,7 +317,7 @@ function DeskWindow() {
               {page === "providers" && <ProvidersSection s={s} save={save} d={d} />}
               {page === "notifications" && <AlertsSection s={s} save={save} />}
               {page === "connection" && <ConnectionSection s={s} save={save} d={d} />}
-              {page === "about" && <AboutSection />}
+              {page === "about" && <AboutSection s={s} save={save} d={d} />}
             </>
           )}
         </div>

@@ -138,6 +138,7 @@ fn save_settings(app: AppHandle, state: State<'_, AppState>, prefs: Settings) ->
         s.active_hub = active;
     })?;
     windows::apply_widget(&app, &saved, is_paired(&saved));
+    local::set_update_mode(&saved.prompture_updates);
     let autostart = app.autolaunch();
     let enabled = autostart.is_enabled().unwrap_or(false);
     if saved.launch_at_login != enabled {
@@ -253,6 +254,22 @@ async fn connect_local(app: AppHandle, state: State<'_, AppState>) -> Result<Val
     Ok(json!({ "url": found.url, "info": info }))
 }
 
+/// The local Prompture's version, the newest on PyPI, and whether Desk can update it.
+#[tauri::command]
+async fn prompture_status(state: State<'_, AppState>, fresh: Option<bool>) -> Result<local::PromptureStatus, ()> {
+    Ok(local::status(&state.http, fresh.unwrap_or(false)).await)
+}
+
+/// Upgrade Desk's own Prompture now and reconnect to it.
+#[tauri::command]
+async fn update_prompture(app: AppHandle, state: State<'_, AppState>) -> Result<local::PromptureStatus, local::LocalError> {
+    local::upgrade_now(&state.http, std::process::id()).await?;
+    if state.snapshot().active().is_some_and(|h| h.is_local()) {
+        restart_live(&app, &state);
+    }
+    Ok(local::status(&state.http, false).await)
+}
+
 #[tauri::command]
 fn select_hub(app: AppHandle, state: State<'_, AppState>, id: String) -> Result<Settings, String> {
     let settings = state.update(&app, |s| {
@@ -339,6 +356,8 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))
         .plugin(
             tauri_plugin_window_state::Builder::default()
@@ -353,6 +372,7 @@ pub fn run() {
                 let _ = emitter.emit("desk://local-setup", text);
             });
             let settings = store::load(&path);
+            local::set_update_mode(&settings.prompture_updates);
             app.manage(AppState {
                 path,
                 settings: Mutex::new(settings),
@@ -399,6 +419,8 @@ pub fn run() {
             open_desk,
             play_alert_sound,
             connect_local,
+            prompture_status,
+            update_prompture,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Prompture Desk");

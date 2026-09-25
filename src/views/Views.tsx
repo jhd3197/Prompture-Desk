@@ -99,15 +99,12 @@ export function HeadroomView({ d }: { d: DeskState }) {
         <div className="card">
           <h3>Coding plans</h3>
           <div className="list">{plans.map(p => <PlanCard key={p.target} p={p} />)}</div>
-          <div className="faint" style={{ fontSize: 11, marginTop: 6 }}>
-            Subscription plan usage for the coding tools on this PC.
-          </div>
         </div>
       )}
       {l.keys.map(k => <KeyCard key={k.id} k={k} onChanged={d.refresh} />)}
       {!d.caps.key_controls && l.keys.length === 0 && (
         <div className="card muted" style={{ fontSize: 12 }}>
-          Per-key spend caps and routes come with prompture-hub. Budgets per provider are in Settings › Providers.
+          Per-key caps and routes need prompture-hub. Provider budgets are in Settings › Providers.
         </div>
       )}
       {rates.length > 0 && (
@@ -161,8 +158,8 @@ export function AlertsView({ d }: { d: DeskState }) {
     return (
       <div className="empty">
         {d.caps.alert_rules
-          ? "No alerts. Add rules in the hub dashboard under Settings › Alerts."
-          : "No alerts. Amber strips still warn you near a budget or rate limit; alert rules with webhooks come with prompture-hub."}
+          ? "No alerts. Add rules in the hub dashboard."
+          : "No alerts."}
       </div>
     );
   }

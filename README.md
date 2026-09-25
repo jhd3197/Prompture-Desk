@@ -23,8 +23,8 @@ In local mode Desk starts `prompture companion` for you (a small localhost-only 
 Prompture) and stops it when Desk quits. It uses the Prompture you installed when that one has the
 companion (1.13+). Otherwise — no Python, no Prompture, or an older one — Desk sets up its own copy
 with the bundled [uv](https://github.com/astral-sh/uv): its own Python and Prompture, kept in Desk's
-data folder, never touching yours, and checked for updates once a day. That takes about a minute,
-once. Attribute spend to projects with `PROMPTURE_PROJECT=name` or
+data folder, never touching yours, and upgraded once a day (Settings › About can switch that to
+ask first, or off). That takes about a minute, once. Attribute spend to projects with `PROMPTURE_PROJECT=name` or
 `get_tracker().project("name")` in your code.
 
 The companion also counts your **coding tools** from the logs they keep on this PC — Claude Code,
