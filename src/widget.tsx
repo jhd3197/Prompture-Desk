@@ -84,6 +84,30 @@ function useJustFinished(d: DeskState): LiveEvent | null {
 }
 
 function Pulse() { return <span className="pulse-dot" />; }
+
+/** How much of today's budget the busiest provider has used, 0–1. */
+function budgetUsed(d: DeskState): number {
+  const top = Math.max(0, ...d.rows.filter(r => r.visible).map(r => r.pct));
+  return Math.min(1, top / 100);
+}
+
+/** A half-dial: the arc fills and the needle turns with `fraction` (0–1). */
+function Gauge({ fraction, warn, size = 26 }: { fraction: number; warn: boolean; size?: number }) {
+  const f = Math.max(0, Math.min(1, fraction));
+  const r = 10;
+  const arc = Math.PI * r; // length of the half circle
+  const angle = Math.PI * (1 - f); // needle: left (0) to right (1)
+  const nx = 12 + Math.cos(angle) * 7;
+  const ny = 13 - Math.sin(angle) * 7;
+  return (
+    <svg className={`gauge ${warn ? "warn" : ""}`} width={size} height={size * 0.62} viewBox="0 0 24 15" aria-hidden>
+      <path className="gauge-track" d="M2 13a10 10 0 0 1 20 0" />
+      {f > 0 && <path className="gauge-fill" d="M2 13a10 10 0 0 1 20 0" strokeDasharray={`${arc * f} ${arc}`} />}
+      <line className="gauge-needle" x1="12" y1="13" x2={nx.toFixed(2)} y2={ny.toFixed(2)} />
+      <circle className="gauge-hub" cx="12" cy="13" r="1.6" />
+    </svg>
+  );
+}
 function Spinner() { return <span className="spinner" aria-label="Loading" />; }
 function Shimmer({ w }: { w: number }) { return <span className="shim" style={{ width: w }} />; }
 
@@ -199,9 +223,8 @@ function Island({ d, settings }: { d: DeskState; settings: Settings }) {
           <span className="isl-sub">{d.status.message ?? ""}</span>
         </div>
         <div {...layer("idle")}>
-          <span className="dot idle" />
-          <span className="isl-text">Idle</span>
-          <span className="isl-sub">no calls yet today</span>
+          <Gauge fraction={budgetUsed(d)} warn={false} size={22} />
+          <span className="isl-sub">No calls yet today</span>
         </div>
         <div {...layer("live")}>
           <Pulse />
@@ -455,8 +478,11 @@ function Dock({ d, settings }: { d: DeskState; settings: Settings }) {
             <span title={phaseTitle(d, p)}><Spinner /></span>
           ) : (
             <span className="dock-state" title={phaseTitle(d, p)}>
-              <span className={`dot ${p === "idle" ? "idle" : "off"}`} />
-              <span className="state-label">{p === "idle" ? "Idle" : "Offline"}</span>
+              {p === "idle" ? (
+                <Gauge fraction={budgetUsed(d)} warn={false} size={32} />
+              ) : (
+                <><span className="dot off" /><span className="state-label">Offline</span></>
+              )}
             </span>
           )}
         </div>

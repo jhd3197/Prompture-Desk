@@ -147,6 +147,14 @@ html:has(.widget-root), html:has(.widget-root) body { overflow: hidden; } /* a t
 .dock-total .num { font-size: 12px; font-weight: 600; }
 .dock-total small { font-size: 10px; color: var(--w-muted); }
 .dock-state { display: flex; align-items: center; gap: 4px; }
+/* budget gauge (idle state) */
+.gauge { display: block; flex: none; overflow: visible; }
+.gauge path { fill: none; stroke-width: 2.4; stroke-linecap: round; }
+.gauge-track { stroke: var(--w-track); }
+.gauge-fill { stroke: var(--ok); transition: stroke-dasharray .4s ease; }
+.gauge.warn .gauge-fill { stroke: var(--warn-c); }
+.gauge-needle { stroke: var(--w-sub); stroke-width: 1.6; stroke-linecap: round; }
+.gauge-hub { fill: var(--w-sub); }
 .dock-state .state-label { font-size: 10.5px; }
 .dock-sep { width: 28px; height: 1px; background: var(--w-border); margin: 4px 0; }
 .dock-row { width: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; }
