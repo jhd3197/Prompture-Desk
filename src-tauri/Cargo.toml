@@ -34,6 +34,11 @@ futures-util = "0.3"
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 thiserror = "1"
 uuid = { version = "1", features = ["v4"] }
+# Vela companion app: Desk's widgets and automation buttons on the Vela desk
+# and phones. Switch to the git dependency once the crate is on GitHub:
+# vela-companion = { git = "https://github.com/jhd3197/vela-companion" }
+vela-companion = { path = "../../vela-companion" }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 
 [profile.release]
 codegen-units = 1

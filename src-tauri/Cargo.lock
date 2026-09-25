@@ -2972,6 +2972,7 @@ dependencies = [
 name = "prompture-desk"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "futures-util",
  "keyring",
  "reqwest 0.12.28",
@@ -2989,6 +2990,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "uuid",
+ "vela-companion",
  "windows-sys 0.59.0",
 ]
 
@@ -4999,6 +5001,16 @@ dependencies = [
  "js-sys",
  "serde_core",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "vela-companion"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]

@@ -16,6 +16,7 @@ mod local;
 mod platform;
 mod store;
 mod tray;
+mod vela;
 mod windows;
 
 use hub::{DeviceCode, HubError, PollOutcome};
@@ -383,6 +384,7 @@ pub fn run() {
                 status: Mutex::new(live::LiveStatus::default()),
             });
             tray::build(app.handle())?;
+            vela::start(app.handle());
             let handle = app.handle().clone();
             let state = app.state::<AppState>();
             restart_live(&handle, &state);
@@ -423,8 +425,14 @@ pub fn run() {
             prompture_status,
             update_prompture,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Prompture Desk");
+        .build(tauri::generate_context!())
+        .expect("error while running Prompture Desk")
+        .run(|app, event| {
+            // Unregister from Vela on the way out, so it shows Desk as closed.
+            if let tauri::RunEvent::Exit = event {
+                vela::stop(app);
+            }
+        });
 }
 
 #[cfg(test)]
