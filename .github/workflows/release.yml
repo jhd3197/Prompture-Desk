@@ -1,0 +1,282 @@
+name: release
+
+# Push to main → downloadable release.
+#
+# Every push to main cuts the next patch version: bump the manifests, tag it,
+# build Prompture Desk for macOS (universal), Windows and Linux, and attach the
+# installers to a public GitHub Release. It can also be run by hand from the
+# Actions tab with an explicit version.
+#
+# Builds are UNSIGNED (no Apple Developer / Windows code-signing cert); the
+# release notes explain the macOS `xattr` step and the Windows SmartScreen
+# click-through. To push to main WITHOUT a release, put [skip ci] in the commit
+# message.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g. 0.2.0). Blank = auto-bump the patch.'
+        required: false
+        type: string
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  # ---- 1. Decide the version, bump manifests, tag, open a draft release ----
+  prepare:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+      tag: ${{ steps.ver.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute version
+        id: ver
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${{ inputs.version }}" ]; then
+            version="${{ inputs.version }}"
+          else
+            last="$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' \
+                    | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1 || true)"
+            if [ -z "$last" ]; then
+              # No release tags yet — ship whatever the manifest already says.
+              version="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+            else
+              v="${last#v}"; IFS=. read -r MA MI PA <<< "$v"
+              version="${MA}.${MI}.$((PA + 1))"
+            fi
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version"    >> "$GITHUB_OUTPUT"
+          echo "Releasing v$version"
+
+      - name: Bump manifests
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ steps.ver.outputs.version }}"
+          for f in src-tauri/tauri.conf.json package.json; do
+            node -e "const f='$f';const j=require('./'+f);j.version='${version}';require('fs').writeFileSync(f,JSON.stringify(j,null,2)+'\n')"
+          done
+          # Only the first version line of the manifest (the [package] one).
+          sed -i '0,/^version = ".*"/s//version = "'"$version"'"/' src-tauri/Cargo.toml
+
+      - name: Commit, tag, push
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ steps.ver.outputs.tag }}"
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
+            echo "Tag $tag already exists on origin — reusing it."
+          else
+            git add -A
+            git commit -m "release: $tag [skip ci]" || echo "nothing to commit"
+            git tag -a "$tag" -m "Prompture Desk $tag"
+            git push origin HEAD:main
+            git push origin "$tag"
+          fi
+
+      - name: Open draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ steps.ver.outputs.tag }}"
+          gh release view "$tag" --repo "${{ github.repository }}" >/dev/null 2>&1 || \
+            gh release create "$tag" --repo "${{ github.repository }}" \
+              --draft --title "Prompture Desk $tag" \
+              --notes "⏳ Build in progress — downloads appear here in ~10 minutes."
+
+  # ---- 2. Desktop app (macOS universal, Windows, Linux) -------------------
+  gui:
+    needs: prepare
+    name: gui (${{ matrix.platform.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - runner: macos-latest
+            args: '--target universal-apple-darwin'
+          - runner: ubuntu-22.04
+            args: ''
+          - runner: windows-latest
+            args: ''
+    runs-on: ${{ matrix.platform.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: macOS — add universal targets
+        if: matrix.platform.runner == 'macos-latest'
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
+      - name: Linux — install Tauri system deps
+        if: matrix.platform.runner == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev \
+            build-essential \
+            file
+
+      - name: Install npm deps
+        run: npm ci
+
+      # tauri build runs `npm run fetch:uv` first (beforeBuildCommand), which
+      # downloads and checksums uv for the target — a lipo'd pair on macOS.
+      - name: Build + bundle, attach to draft release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ needs.prepare.outputs.tag }}
+          releaseName: 'Prompture Desk ${{ needs.prepare.outputs.tag }}'
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.platform.args }}
+
+      # Portable build: Tauri has no portable bundle target, so zip the
+      # unpacked exe with the uv it sets Prompture up with.
+      - name: Windows — package portable zip
+        if: matrix.platform.runner == 'windows-latest'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${{ needs.prepare.outputs.tag }}"
+          version="${{ needs.prepare.outputs.version }}"
+          out="src-tauri/target/release"
+          if [ ! -f "$out/prompture-desk.exe" ] || [ ! -f "$out/uv.exe" ]; then
+            echo "::error::Could not find prompture-desk.exe and uv.exe under $out"
+            exit 1
+          fi
+          mkdir -p dist-portable/PromptureDesk-portable
+          cp "$out/prompture-desk.exe" "dist-portable/PromptureDesk-portable/Prompture Desk.exe"
+          cp "$out/uv.exe" dist-portable/PromptureDesk-portable/uv.exe
+          (cd dist-portable && 7z a "PromptureDesk_${version}_x64-portable.zip" PromptureDesk-portable >/dev/null)
+          gh release upload "$tag" "dist-portable/PromptureDesk_${version}_x64-portable.zip" \
+            --repo "${{ github.repository }}" --clobber
+
+  # ---- 3. Write the final notes and publish the release -------------------
+  publish:
+    needs: [prepare, gui]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate SHA256 checksums for all assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ needs.prepare.outputs.tag }}"
+          mkdir -p assets
+          gh release download "$tag" --repo "${{ github.repository }}" \
+            --dir assets --clobber
+          (cd assets && sha256sum -- * > ../SHA256SUMS.txt)
+          gh release upload "$tag" SHA256SUMS.txt \
+            --repo "${{ github.repository }}" --clobber
+
+      - name: Compose download notes & publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ needs.prepare.outputs.tag }}"
+          base="https://github.com/${REPO}/releases/download/${tag}"
+
+          mac=""; win=""; lin=""
+          while IFS=$'\t' read -r name size; do
+            [ -z "$name" ] && continue
+            if   [ "$size" -ge 1048576 ]; then hs="$(awk "BEGIN{printf \"%.1f MB\", $size/1048576}")"
+            elif [ "$size" -ge 1024 ];    then hs="$(awk "BEGIN{printf \"%.0f KB\", $size/1024}")"
+            else hs="${size} B"; fi
+            row="| [\`${name}\`](${base}/${name}) | ${hs} |"$'\n'
+            case "$name" in
+              *.dmg|*.app.tar.gz)               mac="${mac}${row}" ;;
+              *-setup.exe|*.msi|*-portable.zip) win="${win}${row}" ;;
+              *.AppImage|*.deb|*.rpm)           lin="${lin}${row}" ;;
+            esac
+          done < <(gh release view "$tag" --repo "$REPO" \
+                    --json assets -q '.assets[] | "\(.name)\t\(.size)"')
+
+          {
+            echo "## Prompture Desk ${tag}"
+            echo
+            echo "What your LLM apps are spending, in a small desktop widget: live usage, rate limits and budgets per provider and project. Install it and choose **Use Prompture on this PC**. No Python needed: on first launch Desk sets Prompture up by itself (about a minute, needs an internet connection)."
+            echo
+            echo "**Windows** (x64)"
+            echo
+            echo "| File | Size |"
+            echo "|------|------|"
+            printf '%s' "$win"
+            echo
+            echo "> ⚠️ **Windows SmartScreen:** unsigned installer, so you'll see *\"Windows protected your PC.\"* Click **More info → Run anyway**. The \`-setup.exe\` is the normal installer; the \`.msi\` is for managed deployments."
+            echo ">"
+            echo "> 👜 **Portable:** unzip the \`-portable.zip\` and run \`Prompture Desk.exe\` (keep \`uv.exe\` next to it). Needs WebView2, which Windows 11 and most Windows 10 installs already have."
+            echo
+            echo "**macOS** (universal — Intel + Apple Silicon)"
+            echo
+            echo "| File | Size |"
+            echo "|------|------|"
+            printf '%s' "$mac"
+            echo
+            echo "> ⚠️ **macOS Gatekeeper:** these builds are **not notarized**, so the first launch is blocked. Drag **Prompture Desk.app** into **/Applications**, then run once in Terminal:"
+            echo '> ```bash'
+            echo "> xattr -cr \"/Applications/Prompture Desk.app\""
+            echo '> ```'
+            echo
+            echo "**Linux** (x64)"
+            echo
+            echo "| File | Size |"
+            echo "|------|------|"
+            printf '%s' "$lin"
+            echo
+            echo "> \`.AppImage\`: \`chmod +x\` and run. \`.deb\`: \`sudo apt install ./<file>.deb\`. \`.rpm\`: \`sudo dnf install ./<file>.rpm\`."
+            echo
+            echo "---"
+            echo "**Verify your download:** \`SHA256SUMS.txt\` has a checksum for every file above — \`sha256sum -c SHA256SUMS.txt\` (Linux/macOS) or \`certutil -hashfile <file> SHA256\` (Windows)."
+            echo
+            echo "See the [README](https://github.com/${REPO}/blob/main/README.md) for the widget styles, hub pairing and settings."
+          } > notes.md
+
+          gh release edit "$tag" --repo "$REPO" \
+            --notes-file notes.md --draft=false --latest
