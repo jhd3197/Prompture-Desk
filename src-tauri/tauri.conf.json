@@ -1,0 +1,65 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Prompture Desk",
+  "version": "0.1.0",
+  "identifier": "dev.prompture.desk",
+  "build": {
+    "beforeDevCommand": "npm run fetch:uv && npm run dev",
+    "devUrl": "http://127.0.0.1:28417",
+    "beforeBuildCommand": "npm run fetch:uv && npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Prompture Desk",
+        "url": "index.html",
+        "width": 1000,
+        "height": 680,
+        "minWidth": 820,
+        "minHeight": 560,
+        "visible": false,
+        "decorations": false,
+        "resizable": true,
+        "transparent": true,
+        "shadow": false,
+        "center": true
+      },
+      {
+        "label": "widget",
+        "title": "Prompture Desk widget",
+        "url": "widget.html",
+        "width": 320,
+        "height": 60,
+        "visible": false,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "transparent": true,
+        "shadow": false,
+        "focus": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "DeveloperTool",
+    "externalBin": [
+      "binaries/uv"
+    ],
+    "shortDescription": "What your Prompture apps are spending, in the tray",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}
