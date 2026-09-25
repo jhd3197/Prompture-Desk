@@ -4,9 +4,10 @@ import {
 import { ArrowUpRight, Check, TriangleAlert } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
+import { Mark } from "./components/Mark";
 import { Strip, useAppearance } from "./components/ui";
 import { type LiveEvent, type Settings, desk, hub, tokens, usd } from "./lib/hub";
-import { type ProviderRow, isDetailed, totalLabel, warningLine } from "./lib/model";
+import { type ProviderRow, activeRows, isDetailed, totalLabel, warningLine } from "./lib/model";
 import { ProviderLogo, providerName, providerOf } from "./lib/providers";
 import { type DeskState, useDesk } from "./lib/useDesk";
 import "./styles/app.css";
@@ -85,9 +86,19 @@ function useJustFinished(d: DeskState): LiveEvent | null {
 
 function Pulse() { return <span className="pulse-dot" />; }
 
+/** The dock's way into Desk; an amber badge stands in for the old warning dot. */
+function DeskButton({ page, warn }: { page: Settings["dock_button"]; warn: string | null }) {
+  return (
+    <button className="dock-open" title={warn ? `${warn} · open Desk` : "Open Prompture Desk"} onClick={() => desk.open(page)}>
+      <Mark size={18} />
+      {warn && <span className="dock-open-badge" />}
+    </button>
+  );
+}
+
 /** How much of today's budget the busiest provider has used, 0–1. */
 function budgetUsed(d: DeskState): number {
-  const top = Math.max(0, ...d.rows.filter(r => r.visible).map(r => r.pct));
+  const top = Math.max(0, ...activeRows(d.rows).map(r => r.pct));
   return Math.min(1, top / 100);
 }
 
@@ -150,7 +161,7 @@ function useIslandWindow(target: Box): Box {
 
 function Island({ d, settings }: { d: DeskState; settings: Settings }) {
   const p = phase(d);
-  const rows = d.rows.filter(r => r.visible);
+  const rows = activeRows(d.rows);
   const detailed = isDetailed(settings);
   const total = totalLabel(settings, d.spend);
   const warn = settings.show_alerts ? warningLine(d.alerts, d.rows, settings) : null;
@@ -236,7 +247,7 @@ function Island({ d, settings }: { d: DeskState; settings: Settings }) {
                 <ProviderLogo id={r.id} size={16} dim={r.paused} />
                 {detailed && <span className="num">{Math.round(r.pct)}%</span>}
               </span>
-              <span className={`tone-${r.tone}`} style={{ width: 16, height: 2, borderRadius: 1 }} />
+              {r.meter !== "none" && <span className={`tone-${r.tone}`} style={{ width: 16, height: 2, borderRadius: 1 }} />}
             </span>
           ))}
           {warn && <span className="dot wait" title={warn} />}
@@ -366,11 +377,17 @@ function ProviderCard({
         <span className="card-name">{row.name}</span>
         <span className={`tag ${tag[0]}`}>{tag[1]}</span>
       </div>
-      <div className="card-big"><span className="num">{row.value}</span><span>of {row.budget} today</span></div>
-      <div className="kv">
-        <div className="kv-top"><span>Daily budget</span><span>{row.value} of {row.budget}</span></div>
-        <Strip pct={row.pct} tone={row.paused ? "paused" : row.pct >= warnAt ? "warn" : "ok"} height={5} />
+      <div className="card-big">
+        <span className="num">{row.value}</span>
+        <span>{row.meter === "budget" ? `of ${row.budget} today` : "today"}</span>
       </div>
+      {row.meter === "budget" && (
+        <div className="kv">
+          <div className="kv-top"><span>Daily budget</span><span>{row.value} of {row.budget}</span></div>
+          <Strip pct={row.pct} tone={row.paused ? "paused" : row.pct >= warnAt ? "warn" : "ok"} height={5} />
+        </div>
+      )}
+      {row.meter === "none" && <div className="kv-top"><span>Subscription use</span><span>no limit known</span></div>}
       {row.rateUsed != null && (
         <div className="kv">
           <div className="kv-top"><span>{row.rateKind === "plan" ? "Plan" : "Rate window"}</span><span>{row.rateLabel}</span></div>
@@ -387,14 +404,15 @@ function ProviderCard({
 }
 
 function Dock({ d, settings }: { d: DeskState; settings: Settings }) {
-  const rows = d.rows.filter(r => r.visible);
+  const p = phase(d);
+  // Until the first numbers arrive, the dock is just the spinner: no rows showing 0.
+  const rows = p === "live" || p === "idle" ? activeRows(d.rows) : [];
   const [hover, setHover] = useState<number | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const railRef = useRef<HTMLDivElement>(null);
   const detailed = isDetailed(settings);
   const rowH = detailed ? 58 : 54;
   const total = totalLabel(settings, d.spend);
-  const p = phase(d);
   const right = settings.dock_edge === "right";
 
   // Reveal on hover: the dock waits off-screen behind a tab of provider bars.
@@ -493,14 +511,11 @@ function Dock({ d, settings }: { d: DeskState; settings: Settings }) {
               <ProviderLogo id={r.id} size={26} dim={r.paused} />
               {r.running > 0 && <span className="run-dot" />}
             </span>
-            <Strip pct={r.pct} tone={r.tone} width={30} />
+            {r.meter !== "none" && <Strip pct={r.pct} tone={r.tone} width={30} />}
             {detailed && <span className="num">{r.value}</span>}
           </div>
         ))}
-        {settings.show_alerts && warningLine(d.alerts, d.rows, settings) && (
-          <span className={`dot wait`} style={{ margin: "6px 0 2px" }} title={warningLine(d.alerts, d.rows, settings) ?? ""} />
-        )}
-        {p === "live" && <span style={{ marginTop: 8 }}><Pulse /></span>}
+        <DeskButton page={settings.dock_button ?? "overview"} warn={settings.show_alerts ? warningLine(d.alerts, d.rows, settings) : null} />
       </div>
       {hovered && slid && (
         <div style={{ marginTop: 10 + 46 + (hover ?? 0) * rowH - 10 }}>

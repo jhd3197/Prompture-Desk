@@ -1,81 +1,11 @@
 import { useState } from "react";
-import { Meter, Sparkline, ago } from "../components/ui";
-import { type Alert, type KeyLimits, type LiveEvent, type ProviderLimits, TOOL_NAMES, hub, usd, windowName } from "../lib/hub";
+import { Meter, ago } from "../components/ui";
+import { type Alert, type KeyLimits, type ProviderLimits, TOOL_NAMES, hub, usd, windowName } from "../lib/hub";
 import type { DeskState } from "../lib/useDesk";
 
 function controlError(e: unknown): string {
   const text = String(e);
   return text.includes("read scope") ? "This device is read-only. Pair again with control to change keys." : text;
-}
-
-// ---------------------------------------------------------------- Now
-
-function RunningRow({ e }: { e: LiveEvent }) {
-  const waiting = e.state === "waiting";
-  return (
-    <div className="item">
-      <span className={`pulse ${waiting ? "waiting" : ""}`} />
-      <div className="item-main">
-        <div className="item-title ellipsis mono">{e.routed_to ?? e.model}</div>
-        <div className="item-sub ellipsis">
-          {e.key_name ?? `key ${e.key_id}`}
-          {e.project && <> · {e.project}</>}
-          {waiting ? " · waiting on you" : e.ttft_ms != null ? " · streaming" : ""}
-        </div>
-      </div>
-      <span className="faint tnum" style={{ fontSize: 11 }}>{ago(e.ts)}</span>
-    </div>
-  );
-}
-
-function FinishedRow({ e }: { e: LiveEvent }) {
-  const failed = e.status !== "ok";
-  return (
-    <div className="item">
-      <div className="item-main">
-        <div className="item-title ellipsis mono">{e.served_by ?? e.model}</div>
-        <div className="item-sub ellipsis">
-          {e.key_name && <>{e.key_name} · </>}{e.project ?? "no project"} · {e.latency_ms ?`${(e.latency_ms / 1000).toFixed(1)}s` : "—"}
-          {e.fallback && " · fallback"}
-        </div>
-      </div>
-      {failed
-        ? <span className="badge badge-danger">{e.status}</span>
-        : <span className="mono tnum" style={{ fontSize: 12 }}>{usd(e.cost_usd ?? 0)}</span>}
-    </div>
-  );
-}
-
-export function NowView({ d }: { d: DeskState }) {
-  const recent = [...d.finished].reverse().slice(0, 8);
-  return (
-    <>
-      <div className="card">
-        <div className="row between">
-          <h3>Last 30 minutes</h3>
-          <span className="faint tnum" style={{ fontSize: 11 }}>{d.finished.length} calls</span>
-        </div>
-        <Sparkline events={d.finished} />
-      </div>
-      <div className="card">
-        <h3>{d.caps.running_calls ? `Running now · ${d.running.length}` : "Running now"}</h3>
-        {!d.caps.running_calls && (
-          <div className="muted" style={{ fontSize: 12 }}>
-            Calls appear under "Just finished" as they complete. Seeing calls while they run needs prompture-hub.
-          </div>
-        )}
-        {d.caps.running_calls && (d.running.length === 0
-          ? <div className="empty" style={{ padding: 12 }}>Nothing in flight.</div>
-          : <div className="list">{d.running.map(e => <RunningRow key={e.request_id} e={e} />)}</div>)}
-      </div>
-      {recent.length > 0 && (
-        <div className="card">
-          <h3>Just finished</h3>
-          <div className="list">{recent.map(e => <FinishedRow key={`${e.request_id}-${e.id}`} e={e} />)}</div>
-        </div>
-      )}
-    </>
-  );
 }
 
 // ---------------------------------------------------------------- Headroom

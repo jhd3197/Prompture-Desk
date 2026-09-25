@@ -3,7 +3,7 @@
 // installed and which Prompture can also run.
 import { Check, Cloud, Play } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Segmented, Strip, ago } from "../components/ui";
+import { Segmented, Strip, Toggle, ago } from "../components/ui";
 import { type InstalledAgent, type Settings, type ToolUsage, type Tools, hub, tokens, usd } from "../lib/hub";
 import { ProviderLogo } from "../lib/providers";
 
@@ -81,6 +81,41 @@ function AgentCard({ a, max, metric }: { a: ToolUsage; max: number; metric: Sett
   );
 }
 
+/** Opt-in: Claude Code's 5-hour and weekly plan windows, read the way Claude Code reads them. */
+function ClaudePlanSwitch({ initial }: { initial: boolean }) {
+  const [on, setOn] = useState(initial);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => setOn(initial), [initial]);
+  const change = async (next: boolean) => {
+    setError(null);
+    setOn(next);
+    try {
+      const res = await hub.setClaudePlan(next);
+      setOn(res.claude_plan_usage);
+    } catch (e) {
+      setOn(!next);
+      setError(String(e));
+    }
+  };
+  return (
+    <section className="d-card">
+      <div className="row between" style={{ gap: 16 }}>
+        <div className="stack" style={{ gap: 4 }}>
+          <span className="d-prov-name">Claude Code plan limits</span>
+          <span className="d-prov-sub" style={{ maxWidth: 620, lineHeight: 1.5 }}>
+            Claude subscriptions are measured in a 5-hour window and a weekly window, not a token count, and
+            Claude Code doesn't save them to disk. Turn this on to read them the way Claude Code's own
+            <code className="mono"> /usage</code> does: with Claude Code's saved login, from Anthropic, at most every
+            5 minutes. They then show under Limits and on Claude's strip. Off by default.
+          </span>
+        </div>
+        <Toggle on={on} onChange={change} label="Claude Code plan limits" />
+      </div>
+      {error && <span className="s-error" style={{ fontSize: 12 }}>{error}</span>}
+    </section>
+  );
+}
+
 function InstalledRow({ a, used }: { a: InstalledAgent; used: boolean }) {
   return (
     <div className="t-installed">
@@ -118,6 +153,7 @@ export function ToolsView({ settings, enabled }: { settings: Settings; enabled: 
       <div className="t-grid">
         {data.agents.map(a => <AgentCard key={a.agent} a={a} max={max} metric={settings.metric} />)}
       </div>
+      {data.installed.some(a => a.id === "claude") && <ClaudePlanSwitch initial={!!data.claude_plan_usage} />}
       {data.installed.length > 0 && (
         <section className="d-card">
           <header className="d-card-head"><h3>Installed on this PC</h3></header>
@@ -128,24 +164,50 @@ export function ToolsView({ settings, enabled }: { settings: Settings; enabled: 
   );
 }
 
-/** The Overview's "Coding tools today" card. */
-export function ToolsCard({ settings, enabled, onOpen }: { settings: Settings; enabled: boolean; onOpen: () => void }) {
-  const { data } = useTools("day", enabled, settings.refresh_secs * 3);
-  if (!enabled || !data || data.agents.length === 0) return null;
+const PERIOD_WORDS: Record<Period, string> = { day: "today", week: "this week", month: "this month" };
+
+/**
+ * The Overview's coding-tools card: each tool's tokens for today, the week or
+ * the month. Clicking a tool narrows the activity grid to it (`selected`).
+ */
+export function ToolsCard({
+  settings, enabled, onOpen, selected, onSelect,
+}: {
+  settings: Settings;
+  enabled: boolean;
+  onOpen: () => void;
+  selected?: string | null;
+  onSelect?: (name: string | null) => void;
+}) {
+  const [period, setPeriod] = useState<Period>("day");
+  const { data } = useTools(period, enabled, settings.refresh_secs * 3);
+  if (!enabled || !data) return null;
   const max = Math.max(1, ...data.agents.map(a => a.tokens));
   return (
     <section className="d-card">
       <header className="d-card-head">
-        <h3>Coding tools today</h3>
-        <button className="d-link" onClick={onOpen}>Details</button>
-      </header>
-      {data.agents.slice(0, 5).map(a => (
-        <div key={a.agent} className="d-bar-row t-row">
-          <span className="row" style={{ gap: 8, minWidth: 0 }}><AgentLogo id={a.agent} size={18} /><span className="ellipsis">{a.name}</span></span>
-          <span className="d-bar"><span style={{ width: `${(a.tokens / max) * 100}%` }} /></span>
-          <span className="num d-bar-val">{tokens(a.tokens)}</span>
+        <h3>Coding tools</h3>
+        <div className="row" style={{ gap: 8 }}>
+          <Segmented small label="Period" value={period} options={[["day", "Day"], ["week", "Week"], ["month", "Month"]]} onChange={v => setPeriod(v)} />
+          <button className="d-link" onClick={onOpen}>Details</button>
         </div>
-      ))}
+      </header>
+      {data.agents.length === 0 && <p className="d-empty">No coding-tool calls {PERIOD_WORDS[period]}.</p>}
+      {data.agents.slice(0, 6).map(a => {
+        const on = selected === a.name;
+        return (
+          <button
+            key={a.agent}
+            className={`d-bar-row t-row t-pick ${on ? "on" : ""}`}
+            title={on ? "Show every source in the activity grid" : `Show only ${a.name} in the activity grid`}
+            onClick={() => onSelect?.(on ? null : a.name)}
+          >
+            <span className="row" style={{ gap: 8, minWidth: 0 }}><AgentLogo id={a.agent} size={18} /><span className="ellipsis">{a.name}</span></span>
+            <span className="d-bar"><span style={{ width: `${(a.tokens / max) * 100}%` }} /></span>
+            <span className="num d-bar-val">{tokens(a.tokens)}</span>
+          </button>
+        );
+      })}
     </section>
   );
 }

@@ -7,7 +7,7 @@ import { emit } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
 import { Mark } from "../components/Mark";
 import { ACCENT_HUES, Segmented, Toggle } from "../components/ui";
-import { type ProviderPref, type Settings, desk } from "../lib/hub";
+import { type ProviderPref, type Settings, desk, parseCount, tokens } from "../lib/hub";
 import { providerIds, withNewProviders } from "../lib/model";
 import { ProviderLogo, providerName } from "../lib/providers";
 import type { DeskState } from "../lib/useDesk";
@@ -66,6 +66,11 @@ export function WidgetSection({ s, save }: { s: Settings; save: Save }) {
         </Field>
       )}
       {s.widget_style === "dock" && (
+        <Field title="Dock button opens" hint="The Prompture Desk button at the bottom of the dock.">
+          <Segmented label="Dock button opens" value={s.dock_button ?? "overview"} options={[["overview", "Overview"], ["activity", "Activity"], ["tools", "Coding tools"], ["widget", "Settings"]]} onChange={v => save({ dock_button: v })} />
+        </Field>
+      )}
+      {s.widget_style === "dock" && (
         <Field title="Dock edge" hint="You can also drag the dock by its total; it snaps to the nearer edge.">
           <Segmented label="Dock edge" value={s.dock_edge} options={[["left", "Left"], ["right", "Right"]]} onChange={v => save({ dock_edge: v })} />
         </Field>
@@ -104,20 +109,49 @@ export function AppearanceSection({ s, save }: { s: Settings; save: Save }) {
   );
 }
 
+/** Budget steps for − / +: round amounts from small to very large. */
+const TOKEN_STEPS = [10e3, 25e3, 50e3, 100e3, 250e3, 500e3, 1e6, 2e6, 5e6, 10e6, 25e6, 50e6, 100e6, 250e6, 500e6, 1e9, 2e9, 5e9, 10e9];
+const USD_STEPS = [0.1, 0.25, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000];
+
+function step(steps: number[], value: number, dir: 1 | -1): number {
+  if (dir > 0) return steps.find(s => s > value * 1.0001) ?? steps[steps.length - 1];
+  return [...steps].reverse().find(s => s < value * 0.9999) ?? steps[0];
+}
+
+/**
+ * A provider's daily budget: − / + step through round amounts (… 500k, 1M, 2M …);
+ * the value can still be typed ("2.5M", "750k") for anything in between.
+ */
 function BudgetInput({ pref, metric, onCommit }: { pref: ProviderPref; metric: Settings["metric"]; onCommit: (p: ProviderPref) => void }) {
-  const current = metric === "tokens" ? String(pref.budget_tokens) : pref.budget_usd.toFixed(2);
-  const [text, setText] = useState(current);
-  useEffect(() => setText(current), [current]);
+  const isTokens = metric === "tokens";
+  const value = isTokens ? pref.budget_tokens : pref.budget_usd;
+  const show = (v: number) => (isTokens ? tokens(v) : v.toFixed(2));
+  const [text, setText] = useState(show(value));
+  useEffect(() => setText(show(value)), [value, isTokens]); // eslint-disable-line react-hooks/exhaustive-deps
+  const set = (n: number) => onCommit(isTokens ? { ...pref, budget_tokens: Math.round(n) } : { ...pref, budget_usd: n });
   const commit = () => {
-    const n = Number(text.replace(/[$,\s]/g, ""));
-    if (!Number.isFinite(n) || n < 0) { setText(current); return; }
-    onCommit(metric === "tokens" ? { ...pref, budget_tokens: Math.round(n) } : { ...pref, budget_usd: n });
+    const n = isTokens ? parseCount(text) : Number(text.replace(/[$,\s]/g, ""));
+    if (n == null || !Number.isFinite(n) || n <= 0) { setText(show(value)); return; }
+    set(n);
   };
+  const steps = isTokens ? TOKEN_STEPS : USD_STEPS;
+  const name = providerName(pref.id);
   return (
-    <label className="s-budget">
-      <span>{metric === "tokens" ? "tok" : "$"}</span>
-      <input value={text} onChange={e => setText(e.target.value)} onBlur={commit} onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} aria-label={`${providerName(pref.id)} daily budget`} />
-    </label>
+    <div className="s-budget" title={isTokens ? "Daily token budget · type 750k, 2.5M or 1B for other amounts" : "Daily budget in US dollars"}>
+      <button type="button" className="s-step" onClick={() => set(step(steps, value, -1))} disabled={value <= steps[0]} aria-label={`Lower ${name}'s daily budget`}>−</button>
+      <span className="s-budget-unit">{isTokens ? "tok" : "$"}</span>
+      <input
+        value={text}
+        onChange={e => setText(e.target.value)}
+        onBlur={commit}
+        onKeyDown={e => {
+          if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+          if (e.key === "ArrowUp" || e.key === "ArrowDown") { e.preventDefault(); set(step(steps, value, e.key === "ArrowUp" ? 1 : -1)); }
+        }}
+        aria-label={`${name} daily budget`}
+      />
+      <button type="button" className="s-step" onClick={() => set(step(steps, value, 1))} aria-label={`Raise ${name}'s daily budget`}>+</button>
+    </div>
   );
 }
 

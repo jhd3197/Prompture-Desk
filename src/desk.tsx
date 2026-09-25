@@ -9,10 +9,11 @@ import {
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useState } from "react";
 import ReactDOM from "react-dom/client";
+import { ActivityHeatmap } from "./components/Heatmap";
 import { Mark } from "./components/Mark";
 import { Sparkline, Strip, ago, useAppearance } from "./components/ui";
-import { type Page, type Settings, type Spend, desk, hub, tokens, usd } from "./lib/hub";
-import { totalLabel, warningLine } from "./lib/model";
+import { type Page, type Settings, type Spend, count, desk, hub, tokens, usd } from "./lib/hub";
+import { activeRows, totalLabel, warningLine } from "./lib/model";
 import { ProviderLogo, providerName, providerOf } from "./lib/providers";
 import { type DeskState, useDesk } from "./lib/useDesk";
 import "./styles/app.css";
@@ -21,7 +22,8 @@ import {
   AboutSection, AlertsSection, AppearanceSection, ConnectionSection, ProvidersSection, type Save, WidgetSection,
 } from "./views/Settings";
 import { ToolsCard, ToolsView } from "./views/Tools";
-import { AlertsView, HeadroomView, NowView } from "./views/Views";
+import { ActivityPage } from "./views/ActivityPage";
+import { AlertsView, HeadroomView } from "./views/Views";
 
 const DASHBOARD: Array<[Page, string, LucideIcon]> = [
   ["overview", "Overview", LayoutDashboard], ["activity", "Activity", Activity], ["tools", "Coding tools", SquareTerminal],
@@ -72,11 +74,13 @@ function Overview({ d, s, go }: { d: DeskState; s: Settings; go: (p: Page) => vo
   const { week, month } = usePeriods(d.paired);
   const today = d.spend?.total;
   const total = totalLabel(s, d.spend);
-  const rows = d.rows.filter(r => r.visible);
+  const rows = activeRows(d.rows);
   const warn = s.show_alerts ? warningLine(d.alerts, d.rows, s) : null;
   const projects = [...(d.spend?.by_project ?? [])].sort((a, b) => b.cost_usd - a.cost_usd || b.tokens - a.tokens).slice(0, 5);
   const projectMax = Math.max(1e-9, ...projects.map(p => (s.metric === "tokens" ? p.tokens : p.cost_usd)));
   const recent = [...d.finished].reverse().slice(0, 6);
+  // One contributor to show in the activity grid; null = everything.
+  const [source, setSource] = useState<string | null>(null);
 
   return (
     <div className="d-page">
@@ -86,11 +90,13 @@ function Overview({ d, s, go }: { d: DeskState; s: Settings; go: (p: Page) => vo
           <span className="d-hero-sub">{total.sub}</span>
         </div>
         <div className="d-stats">
-          <Stat label="Calls today" value={String(today?.requests ?? 0)} sub={today?.errors ? `${today.errors} failed` : "no failures"} />
-          <Stat label="This week" value={fmt(s, week?.total)} sub={week ? `${week.total.requests} calls` : undefined} />
-          <Stat label="This month" value={fmt(s, month?.total)} sub={month ? `${month.total.requests} calls` : undefined} />
+          <Stat label="Calls today" value={count(today?.requests ?? 0)} sub={today?.errors ? `${count(today.errors)} failed` : "no failures"} />
+          <Stat label="This week" value={fmt(s, week?.total)} sub={week ? `${count(week.total.requests)} calls` : undefined} />
+          <Stat label="This month" value={fmt(s, month?.total)} sub={month ? `${count(month.total.requests)} calls` : undefined} />
         </div>
       </section>
+
+      <ActivityHeatmap settings={s} enabled={!!d.caps.activity} source={source} onSource={setSource} />
 
       {warn && <button className="d-warn" onClick={() => go("limits")}><TriangleAlert size={14} aria-hidden /> {warn}</button>}
 
@@ -113,10 +119,11 @@ function Overview({ d, s, go }: { d: DeskState; s: Settings; go: (p: Page) => vo
                   <div className="d-prov-main">
                     <div className="row between">
                       <span className="d-prov-name">{r.name}{r.paused && <span className="d-tag">paused</span>}</span>
-                      <span className="num d-prov-val">{r.value}<span className="d-of"> / {r.budget}</span></span>
+                      <span className="num d-prov-val">{r.value}{r.meter === "budget" && <span className="d-of"> / {r.budget}</span>}</span>
                     </div>
-                    <Strip pct={r.pct} tone={r.tone} height={5} />
-                    {r.rateLabel && <span className="d-prov-sub">{r.rateKind === "plan" ? "Plan" : "Rate window"} {r.rateLabel}</span>}
+                    {r.meter !== "none" && <Strip pct={r.pct} tone={r.tone} height={5} />}
+                    {r.meter === "none" && <span className="d-prov-sub">Subscription use · no limit known</span>}
+                    {r.rateLabel && <span className="d-prov-sub">{r.rateKind === "plan" ? "Plan ·" : "Rate window"} {r.rateLabel}</span>}
                   </div>
                 </div>
               ))}
@@ -125,7 +132,7 @@ function Overview({ d, s, go }: { d: DeskState; s: Settings; go: (p: Page) => vo
         </section>
 
         <div className="d-col">
-          <ToolsCard settings={s} enabled={!!d.caps.coding_tools} onOpen={() => go("tools")} />
+          <ToolsCard settings={s} enabled={!!d.caps.coding_tools} onOpen={() => go("tools")} selected={source} onSelect={setSource} />
           <section className="d-card">
             <header className="d-card-head"><h3>Projects today</h3></header>
             {projects.length === 0 ? (
@@ -241,7 +248,7 @@ function DeskWindow() {
           ) : (
             <>
               {page === "overview" && <Overview d={d} s={s} go={setPage} />}
-              {page === "activity" && <div className="d-view"><NowView d={d} /></div>}
+              {page === "activity" && <ActivityPage d={d} settings={s} />}
               {page === "tools" && <ToolsView settings={s} enabled={!!d.caps.coding_tools} />}
               {page === "limits" && <div className="d-view"><HeadroomView d={d} /></div>}
               {page === "alerts" && <div className="d-view"><AlertsView d={d} /></div>}

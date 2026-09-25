@@ -82,15 +82,17 @@ export function Toggle({ on, onChange, label }: { on: boolean; onChange: (v: boo
 }
 
 export function Segmented<T extends string | number>({
-  value, options, onChange, label,
+  value, options, onChange, label, small = false,
 }: {
   value: T;
   options: Array<[T, string]>;
   onChange: (v: T) => void;
   label: string;
+  /** A tighter variant for card headers. */
+  small?: boolean;
 }) {
   return (
-    <div className="seg" role="radiogroup" aria-label={label}>
+    <div className={`seg ${small ? "seg-sm" : ""}`} role="radiogroup" aria-label={label}>
       {options.map(([v, text]) => (
         <button key={String(v)} type="button" role="radio" aria-checked={value === v} className={value === v ? "active" : ""} onClick={() => onChange(v)}>
           {text}

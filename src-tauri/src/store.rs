@@ -58,6 +58,8 @@ pub struct Settings {
     pub metric: String,
     /// Edge dock side: "left" or "right".
     pub dock_edge: String,
+    /// The page of Desk the dock's button opens: "overview", "activity", "tools" or "widget" (settings).
+    pub dock_button: String,
     /// Edge dock vertical position, as a fraction of the work area height.
     pub dock_y: f64,
     /// "always" (always shown) or "hover" (tucks into a sliver at the screen edge until hovered).
@@ -102,6 +104,7 @@ impl Default for Settings {
             widget_style: "capsule".into(),
             metric: "price".into(),
             dock_edge: "right".into(),
+            dock_button: "overview".into(),
             dock_y: 0.2,
             visibility: "hover".into(),
             detail: "auto".into(),
