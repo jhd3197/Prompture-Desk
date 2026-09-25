@@ -40,6 +40,20 @@ write its 5-hour and weekly windows to disk; Prompture can read them the way Cla
 Claude Code's own login, but only if you opt in with `PROMPTURE_CLAUDE_PLAN_USAGE=1`. Turn all
 coding-tool reading off by running the companion with `--no-coding-tools`.
 
+## Automations
+
+**Desk › Automations** queues coding-agent steps that run one after another, like pre-moves: pick a
+project folder and an agent (Claude Code or Codex), list the steps (**From roadmap** adds one
+`/gsd:execute-phase N` per unchecked phase in `.planning/ROADMAP.md`), and hit **Run**. Each step
+starts as soon as the one before it finishes, either continuing its session or starting a fresh one.
+Steps that haven't started can still be added, removed and dragged while it runs.
+
+The queue pauses by itself when a step fails, when the agent ends on a question (answer it from
+Desk and that step's session continues), when the agent's plan window is nearly used up (it resumes
+when the window resets), or past a cost cap you set. The capsule shows progress, and Desk notifies
+you when a step finishes, when the queue needs you, and when it's done. Steps run unattended, so the
+agent's permission prompts are skipped. Prompture's companion runs the queue, so it stops if Desk quits.
+
 ## The widget
 
 Pick one style in **Desk › Widget**. All three show the same thing — each provider's usage
