@@ -48,6 +48,7 @@ export function useDesk({ primary }: { primary: boolean }): DeskState {
   const [finished, setFinished] = useState<LiveEvent[]>([]);
   const [limits, setLimits] = useState<Limits | null>(null);
   const [spend, setSpend] = useState<Spend | null>(null);
+  const [apiSpend, setApiSpend] = useState<Spend | null>(null);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [caps, setCaps] = useState<Capabilities>(HUB_CAPABILITIES);
@@ -64,7 +65,28 @@ export function useDesk({ primary }: { primary: boolean }): DeskState {
   const loadLimits = useCallback(() => {
     hub.limits().then(l => { setLimits(l); setError(null); }).catch(e => setError(String(e)));
   }, []);
-  const loadSpend = useCallback(() => { hub.spend("day").then(setSpend).catch(() => undefined); }, []);
+  const codingTools = !!caps.coding_tools;
+
+  // The live stream only carries calls that finish from now on: fill in the last
+  // half hour once connected (local companion), without doubling any call.
+  const live = status.state === "live";
+  useEffect(() => {
+    if (!live || !caps.activity) return;
+    hub.recent(Math.round(HISTORY_MS / 60_000)).then(events => {
+      setFinished(current => {
+        const seen = new Set(current.map(e => e.request_id));
+        const merged = [...events.filter(e => !seen.has(e.request_id)), ...current];
+        const cutoff = Date.now() - HISTORY_MS;
+        return merged.filter(e => Date.parse(e.ts ?? "") > cutoff).sort((a, b) => Date.parse(a.ts ?? "") - Date.parse(b.ts ?? ""));
+      });
+    }).catch(() => undefined);
+  }, [live, caps.activity]);
+  const loadSpend = useCallback(() => {
+    hub.spend("day").then(setSpend).catch(() => undefined);
+    // With coding tools in the totals, budgets need the API-only numbers too.
+    if (codingTools) hub.spend("day", "api").then(setApiSpend).catch(() => undefined);
+    else setApiSpend(null);
+  }, [codingTools]);
   const loadAlerts = useCallback(() => { hub.alerts().then(setAlerts).catch(() => undefined); }, []);
   const refresh = useCallback(() => { loadLimits(); loadSpend(); loadAlerts(); }, [loadLimits, loadSpend, loadAlerts]);
 
@@ -177,8 +199,8 @@ export function useDesk({ primary }: { primary: boolean }): DeskState {
     [running],
   );
   const rows = useMemo(
-    () => (settings ? providerRows(settings, spend, limits, runningList) : []),
-    [settings, spend, limits, runningList],
+    () => (settings ? providerRows(settings, spend, limits, runningList, apiSpend) : []),
+    [settings, spend, limits, runningList, apiSpend],
   );
 
   // Tray chip, from the panel window only.
@@ -194,7 +216,8 @@ export function useDesk({ primary }: { primary: boolean }): DeskState {
       : [`${total.value} ${total.sub}`, `${runningList.length} running`, `${open} alert${open === 1 ? "" : "s"}`];
     desk.updateTray({
       state: offline ? "offline" : open > 0 || warn ? "attention" : "ok",
-      bars: visible.slice(0, 5).map(r => ({ fraction: Math.min(1, r.pct / 100), tone: r.tone })),
+      // Bars only when the tray icon is the widget; otherwise it stays the app icon.
+      bars: settings.widget_style !== "tray" ? [] : visible.slice(0, 5).map(r => ({ fraction: Math.min(1, r.pct / 100), tone: r.tone })),
       alert: settings.show_alerts && (open > 0 || warn),
       tooltip: `Prompture Desk — ${parts.join(" · ")}`,
     }).catch(() => undefined);

@@ -14,6 +14,8 @@ export interface Settings {
   visibility: "always" | "hover";
   metric: "price" | "tokens";
   dock_edge: "left" | "right";
+  /** The page of Desk the dock's button opens. */
+  dock_button: "overview" | "activity" | "tools" | "widget";
   dock_y: number;
   detail: "compact" | "auto" | "detailed";
   show_alerts: boolean;
@@ -39,6 +41,10 @@ export interface Capabilities {
   key_controls: boolean;
   provider_controls: boolean;
   alert_rules: boolean;
+  /** Local companion only: usage read from coding agents' own logs (/v1/tools). */
+  coding_tools?: boolean;
+  /** Local companion only: per-day totals for the activity grid (/v1/activity). */
+  activity?: boolean;
 }
 
 export interface HubInfo {
@@ -52,8 +58,53 @@ export interface HubInfo {
 
 /** Hubs from before capabilities were advertised could do everything. */
 export const HUB_CAPABILITIES: Capabilities = {
-  running_calls: true, projects: true, key_controls: true, provider_controls: true, alert_rules: true,
+  running_calls: true, projects: true, key_controls: true, provider_controls: true, alert_rules: true, coding_tools: false,
 };
+
+/** One row per model or project inside a coding agent's totals. */
+export interface ToolBreakdown { model?: string; project?: string | null; requests: number; tokens: number; cost_usd: number }
+
+/** A coding agent's usage for a period, read from its own logs by Prompture. */
+export interface ToolUsage {
+  agent: string;
+  name: string;
+  requests: number;
+  tokens: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  reasoning_tokens: number;
+  /** API-equivalent cost; "estimated" from model rates, "reported" by the tool, or "unknown". */
+  cost_usd: number;
+  cost_source: "reported" | "estimated" | "mixed" | "unknown";
+  last_used: string | null;
+  models: ToolBreakdown[];
+  projects: ToolBreakdown[];
+}
+
+/** One local day of usage: Prompture calls plus coding tools. */
+export interface ActivityDay {
+  date: string; // YYYY-MM-DD, local
+  requests: number;
+  tokens: number;
+  cost_usd: number;
+  sources: Array<{ name: string; requests: number; tokens: number; cost_usd?: number }>;
+}
+
+/** Per-day totals; only active days are listed. */
+export interface Activity { start: string; end: string; days: ActivityDay[] }
+
+export interface InstalledAgent { id: string; name: string; installed: boolean; runnable: boolean; usage: boolean }
+
+export interface Tools {
+  period: "day" | "week" | "month";
+  start: string;
+  agents: ToolUsage[];
+  installed: InstalledAgent[];
+  /** Whether Claude Code's plan windows are fetched (opt-in; uses Claude Code's login). */
+  claude_plan_usage?: boolean;
+}
 
 export type LocalProblem = { code: "not_installed" | "needs_upgrade" | "failed"; message: string };
 
@@ -91,6 +142,12 @@ export interface LimitWindow { limit: number | null; remaining: number | null; r
 
 export interface ProviderLimits {
   target: string;
+  /** "headers" for API rate limits; "plan" for a subscription's usage windows (percent units). */
+  source?: string;
+  /** For plans: the coding tool ("claude-code" | "codex") and the plan's name. */
+  tool?: string;
+  tool_name?: string;
+  plan?: string | null;
   current_headroom: number | null;
   current_window: string | null;
   observed_at: number;
@@ -198,14 +255,22 @@ function call<T>(method: string, path: string, body?: unknown): Promise<T> {
 
 /** Pages of Desk's window, dashboard first, then settings. */
 export type Page =
-  | "overview" | "activity" | "limits" | "alerts"
+  | "overview" | "activity" | "tools" | "limits" | "alerts"
   | "widget" | "appearance" | "providers" | "notifications" | "connection" | "about";
 
 export const hub = {
   info: () => call<HubInfo>("GET", "/v1/companion/info"),
   limits: () => call<Limits>("GET", "/v1/limits"),
-  spend: (period: "day" | "week" | "month" = "day") => call<Spend>("GET", `/v1/spend?period=${period}`),
+  /** `sources: "api"` leaves coding-tool (subscription) usage out — what budgets measure. */
+  spend: (period: "day" | "week" | "month" = "day", sources: "all" | "api" = "all") =>
+    call<Spend>("GET", `/v1/spend?period=${period}&tz_offset=${TZ()}${sources === "api" ? "&sources=api" : ""}`),
+  setClaudePlan: (enabled: boolean) => call<{ claude_plan_usage: boolean }>("POST", "/v1/tools/claude-plan", { enabled }),
   alerts: () => call<Alert[]>("GET", "/v1/alerts?limit=50"),
+  tools: (period: "day" | "week" | "month" = "day") => call<Tools>("GET", `/v1/tools?period=${period}&tz_offset=${TZ()}`),
+  /** Calls that finished in the last `minutes` (local companion), to fill views on connect. */
+  recent: (minutes: number) => call<LiveEvent[]>("GET", `/v1/recent?minutes=${minutes}`),
+  /** `tzOffset` is `Date.getTimezoneOffset()`, so days break at local midnight. */
+  activity: (days: number, tzOffset: number) => call<Activity>("GET", `/v1/activity?days=${days}&tz_offset=${tzOffset}`),
   ackAlert: (id: number) => call<Alert>("POST", `/v1/alerts/${id}/ack`),
   pauseKey: (id: number) => call<KeyLimits>("POST", `/v1/keys/${id}/pause`),
   resumeKey: (id: number) => call<KeyLimits>("POST", `/v1/keys/${id}/resume`),
@@ -215,13 +280,51 @@ export const hub = {
   resumeProvider: (name: string) => call<{ provider: string; paused: boolean }>("POST", `/v1/providers/${encodeURIComponent(name)}/resume`),
 };
 
+const WINDOW_NAMES: Record<string, string> = { session_5h: "5-hour session", weekly: "weekly" };
+
+/** "session_5h" → "5-hour session", "weekly_opus" → "weekly Opus", "input_tokens" → "input tokens". */
+export function windowName(name: string | null | undefined): string {
+  if (!name) return "";
+  if (WINDOW_NAMES[name]) return WINDOW_NAMES[name];
+  const scoped = name.match(/^weekly_(.+)$/);
+  if (scoped) return `weekly ${scoped[1].charAt(0).toUpperCase()}${scoped[1].slice(1)}`;
+  return name.replace(/[_-]/g, " ");
+}
+
+/** Fallback names for plan targets from companions that don't send `tool_name`. */
+export const TOOL_NAMES: Record<string, string> = { claude: "Claude Code", "claude-code": "Claude Code", codex: "Codex" };
+
+const UNITS: Array<[number, string]> = [[1e12, "T"], [1e9, "B"], [1e6, "M"], [1e3, "k"]];
+
+/** Short token counts with three significant digits: 950, 12.4k, 116M, 1.66B, 13.5B. */
 export function tokens(v: number): string {
-  if (v >= 1_000_000) return `${+(v / 1_000_000).toFixed(v >= 10_000_000 ? 0 : 2)}M`;
-  if (v >= 1_000) return `${Math.round(v / 1_000)}k`;
-  return String(v);
+  for (const [size, unit] of UNITS) {
+    if (v >= size) {
+      const n = v / size;
+      return `${+n.toFixed(n >= 100 ? 0 : n >= 10 ? 1 : 2)}${unit}`;
+    }
+  }
+  return String(Math.round(v));
+}
+
+/** Parse a count typed by a person: "1M", "2.5b", "500k", "1,000,000". */
+export function parseCount(text: string): number | null {
+  const m = text.trim().toLowerCase().replace(/[,_\s]/g, "").match(/^(\d+(?:\.\d+)?)([kmbt]?)$/);
+  if (!m) return null;
+  const mult = { "": 1, k: 1e3, m: 1e6, b: 1e9, t: 1e12 }[m[2] as "" | "k" | "m" | "b" | "t"];
+  return Math.round(Number(m[1]) * mult);
+}
+
+/** A whole number with separators: 11,115. */
+export function count(v: number): string {
+  return Math.round(v).toLocaleString();
 }
 
 export function usd(v: number): string {
   if (v === 0) return "$0.00";
-  return v < 0.01 ? `$${v.toFixed(4)}` : `$${v.toFixed(2)}`;
+  if (v < 0.01) return `$${v.toFixed(4)}`;
+  return `$${v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
+
+/** This machine's offset from UTC, as the companion expects it (minutes behind UTC). */
+const TZ = () => new Date().getTimezoneOffset();
