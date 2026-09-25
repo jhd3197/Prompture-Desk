@@ -8,7 +8,7 @@
 
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -59,21 +59,31 @@ async function fetchUv(triple, work) {
 
 const triple = targetTriple();
 const windows = triple.includes("windows");
-const dest = join(root, "src-tauri", "binaries", `uv-${triple}${windows ? ".exe" : ""}`);
-if (existsSync(dest)) process.exit(0);
+const binaries = join(root, "src-tauri", "binaries");
+const target = (t) => join(binaries, `uv-${t}${windows ? ".exe" : ""}`);
+const dest = target(triple);
+// A universal macOS build compiles each architecture on its own (each wants its
+// own uv) and then bundles the merged one.
+const wanted = triple === "universal-apple-darwin"
+  ? [target("aarch64-apple-darwin"), target("x86_64-apple-darwin"), dest]
+  : [dest];
+if (wanted.every(existsSync)) process.exit(0);
 
 const work = mkdtempSync(join(tmpdir(), "desk-uv-"));
 try {
-  mkdirSync(dirname(dest), { recursive: true });
+  mkdirSync(binaries, { recursive: true });
+  // Copy rather than rename: the temp dir can be on another drive (CI runners).
   if (triple === "universal-apple-darwin") {
-    // uv has no universal build; merge the two macOS builds into one.
     const arm = await fetchUv("aarch64-apple-darwin", work);
     const intel = await fetchUv("x86_64-apple-darwin", work);
+    copyFileSync(arm, target("aarch64-apple-darwin"));
+    copyFileSync(intel, target("x86_64-apple-darwin"));
+    // uv has no universal build; merge the two.
     execFileSync("lipo", ["-create", "-output", dest, arm, intel]);
   } else {
-    renameSync(await fetchUv(triple, work), dest);
+    copyFileSync(await fetchUv(triple, work), dest);
   }
-  if (!windows) execFileSync("chmod", ["+x", dest]);
+  if (!windows) for (const f of wanted) execFileSync("chmod", ["+x", f]);
 } finally {
   rmSync(work, { recursive: true, force: true });
 }
