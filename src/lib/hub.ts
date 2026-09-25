@@ -26,6 +26,8 @@ export interface Settings {
   accent: number;
   opacity: number;
   providers: ProviderPref[];
+  /** Show only providers used today (or with a call running). */
+  hide_unused: boolean;
   warn_at: number;
   notify_alerts: boolean;
   notify_errors: boolean;
@@ -33,6 +35,19 @@ export interface Settings {
   notify_long_calls: boolean;
   play_sound: boolean;
   refresh_secs: number;
+  language: "system" | "en" | "es" | "zh-CN";
+  /** Desk's own Prompture: upgraded daily ("auto"), offered ("ask") or left alone ("off"). */
+  prompture_updates: "auto" | "ask" | "off";
+}
+
+/** The Prompture behind local mode, against the newest release on PyPI. */
+export interface PromptureStatus {
+  mode: Settings["prompture_updates"];
+  /** "desk": Desk's own copy, which it can update; "system": one the user installed. */
+  source: "desk" | "system" | null;
+  version: string | null;
+  latest: string | null;
+  update_available: boolean;
 }
 
 export interface Capabilities {
@@ -232,6 +247,10 @@ export const desk = {
   discoverLocal: () => invoke<{ url: string; info: HubInfo } | null>("discover_local"),
   /** Use Prompture on this PC; rejects with a LocalProblem. */
   connectLocal: () => invoke<{ url: string; info: HubInfo }>("connect_local"),
+  /** `fresh` skips the cached PyPI answer. */
+  promptureStatus: (fresh = false) => invoke<PromptureStatus>("prompture_status", { fresh }),
+  /** Upgrade Desk's own Prompture and restart it; rejects with a LocalProblem. */
+  updatePrompture: () => invoke<PromptureStatus>("update_prompture"),
   startPairing: (url: string, control: boolean) => invoke<DeviceCode>("start_pairing", { url, control }),
   pollPairing: (name?: string) => invoke<PollResult>("poll_pairing", { name }),
   selectHub: (id: string) => invoke<Settings>("select_hub", { id }),

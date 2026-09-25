@@ -67,13 +67,13 @@ function AgentCard({ a, max, metric }: { a: ToolUsage; max: number; metric: Sett
         <div>
           <span className="t-label">Models</span>
           {a.models.slice(0, 3).map(m => (
-            <div key={m.model} className="t-line"><span className="mono ellipsis">{m.model?.split("/").pop()}</span><span className="num">{tokens(m.tokens)}</span></div>
+            <div key={m.model} className="t-line"><span className="mono ellipsis" title={m.model}>{m.model?.split("/").pop()}</span><span className="num">{tokens(m.tokens)}</span></div>
           ))}
         </div>
         <div>
           <span className="t-label">Projects</span>
           {a.projects.slice(0, 3).map(p => (
-            <div key={p.project ?? "-"} className="t-line"><span className="ellipsis">{p.project ?? "—"}</span><span className="num">{tokens(p.tokens)}</span></div>
+            <div key={p.project ?? "-"} className="t-line"><span className="ellipsis" title={p.project ?? undefined}>{p.project ?? "—"}</span><span className="num">{tokens(p.tokens)}</span></div>
           ))}
         </div>
       </div>
@@ -103,10 +103,7 @@ function ClaudePlanSwitch({ initial }: { initial: boolean }) {
         <div className="stack" style={{ gap: 4 }}>
           <span className="d-prov-name">Claude Code plan limits</span>
           <span className="d-prov-sub" style={{ maxWidth: 620, lineHeight: 1.5 }}>
-            Claude subscriptions are measured in a 5-hour window and a weekly window, not a token count, and
-            Claude Code doesn't save them to disk. Turn this on to read them the way Claude Code's own
-            <code className="mono"> /usage</code> does: with Claude Code's saved login, from Anthropic, at most every
-            5 minutes. They then show under Limits and on Claude's strip. Off by default.
+            Your 5-hour and weekly windows, read like <code className="mono">/usage</code> with Claude Code's login.
           </span>
         </div>
         <Toggle on={on} onChange={change} label="Claude Code plan limits" />
@@ -135,7 +132,7 @@ export function ToolsView({ settings, enabled }: { settings: Settings; enabled: 
   const [period, setPeriod] = useState<Period>("day");
   const { data, error } = useTools(period, enabled, settings.refresh_secs * 3);
   if (!enabled) {
-    return <p className="d-empty">Coding-tool usage comes from Prompture on this PC. It isn't available through a hub connection.</p>;
+    return <p className="d-empty">Coding tools are only available with Prompture on this PC.</p>;
   }
   if (!data) return <p className="d-empty">{error ?? "Reading your coding tools' logs…"}</p>;
   const max = Math.max(1, ...data.agents.map(a => a.tokens));
@@ -143,13 +140,10 @@ export function ToolsView({ settings, enabled }: { settings: Settings; enabled: 
   return (
     <div className="d-page">
       <div className="row between">
-        <p className="d-empty" style={{ maxWidth: 560 }}>
-          Read from the logs each tool keeps on this PC: tokens, models and projects, never your prompts.
-          Costs are what the same tokens would cost on the API; subscriptions don't bill per token.
-        </p>
+        <p className="d-empty" style={{ maxWidth: 560 }}>From each tool's local logs. Costs are API-equivalent.</p>
         <Segmented label="Period" value={period} options={[["day", "Today"], ["week", "Week"], ["month", "Month"]]} onChange={v => setPeriod(v)} />
       </div>
-      {data.agents.length === 0 && <p className="d-empty">No coding-tool calls {period === "day" ? "today" : `this ${period}`}.</p>}
+      {data.agents.length === 0 && <p className="d-empty">{`No coding-tool calls ${period === "day" ? "today" : `this ${period}`}.`}</p>}
       <div className="t-grid">
         {data.agents.map(a => <AgentCard key={a.agent} a={a} max={max} metric={settings.metric} />)}
       </div>
@@ -192,7 +186,7 @@ export function ToolsCard({
           <button className="d-link" onClick={onOpen}>Details</button>
         </div>
       </header>
-      {data.agents.length === 0 && <p className="d-empty">No coding-tool calls {PERIOD_WORDS[period]}.</p>}
+      {data.agents.length === 0 && <p className="d-empty">{`No coding-tool calls ${PERIOD_WORDS[period]}.`}</p>}
       {data.agents.slice(0, 6).map(a => {
         const on = selected === a.name;
         return (

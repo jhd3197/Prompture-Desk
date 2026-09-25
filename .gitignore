@@ -6,3 +6,5 @@ src-tauri/gen/
 .DS_Store
 *.tsbuildinfo
 src-tauri/binaries/
+.updater/
+/graphify-out

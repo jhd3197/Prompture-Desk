@@ -81,6 +81,8 @@ pub struct Settings {
 
     // Providers, in widget order
     pub providers: Vec<ProviderPref>,
+    /// Show only providers used today (or with a call running).
+    pub hide_unused: bool,
 
     // Alerts
     /// Strips turn amber at this share (percent) of a budget or rate window.
@@ -94,6 +96,12 @@ pub struct Settings {
     // Connection
     /// How often limits and spend are re-read (the live stream is continuous).
     pub refresh_secs: u32,
+
+    // General
+    /// Interface language: "system", "en", "es" or "zh-CN".
+    pub language: String,
+    /// Desk's own Prompture: "auto" (upgrade daily before it starts), "ask" (offer new versions) or "off".
+    pub prompture_updates: String,
 }
 
 impl Default for Settings {
@@ -116,6 +124,7 @@ impl Default for Settings {
             accent: 0,
             opacity: 100,
             providers: Vec::new(),
+            hide_unused: true,
             warn_at: 85,
             notify_alerts: true,
             notify_errors: false,
@@ -123,6 +132,8 @@ impl Default for Settings {
             notify_long_calls: false,
             play_sound: false,
             refresh_secs: 5,
+            language: "system".into(),
+            prompture_updates: "auto".into(),
         }
     }
 }

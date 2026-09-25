@@ -1,12 +1,15 @@
 import { useEffect } from "react";
 import type { LiveEvent, Settings } from "../lib/hub";
+import { applyUiLanguage } from "../lib/i18n";
 
 /** Accent hues offered in Settings › Appearance (index = Settings.accent). */
 export const ACCENT_HUES = [150, 190, 235, 275, 320, 15, 55, 95];
 
-/** Apply light/dark/system mode and the accent hue from settings to this window. */
+/** Apply light/dark/system mode, the accent hue and the language from settings to this window. */
 export function useAppearance(settings: Settings | null) {
   const mode = settings?.theme ?? "system";
+  const language = settings?.language;
+  useEffect(() => { if (language) applyUiLanguage(language); }, [language]);
   const hue = ACCENT_HUES[settings?.accent ?? 0] ?? ACCENT_HUES[0];
   useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: dark)");

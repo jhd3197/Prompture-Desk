@@ -94,7 +94,7 @@ export function Onboarding({ onPaired }: { onPaired: () => void }) {
         <div className="card stack">
           <h3>Approve this device</h3>
           <p className="muted" style={{ margin: 0 }}>
-            The hub's pairing page should have opened in your browser. Check that it shows this code, then approve.
+            Approve this code on the page that opened in your browser.
           </p>
           <div className="code-box">{step.code.user_code}</div>
           <button className="btn" onClick={() => openUrl(step.code.verification_uri_complete)}>Open the approval page again</button>
@@ -113,8 +113,7 @@ export function Onboarding({ onPaired }: { onPaired: () => void }) {
       <div className="card stack">
         <h3>Prompture on this PC</h3>
         <p className="muted" style={{ margin: 0 }}>
-          See what your Prompture scripts and apps are spending — per provider and project, with rate limits and
-          provider balances. No server to set up, and no Python needed: Desk sets Prompture up for you.
+          Spend, limits and balances for your Prompture apps. Desk sets Prompture up for you.
         </p>
         {local.kind === "working" ? (
           <div className="row muted" style={{ fontSize: 12.5 }}><span className="pulse" />{local.text}</div>
@@ -144,8 +143,7 @@ export function Onboarding({ onPaired }: { onPaired: () => void }) {
           {!showHub && <button className="btn btn-sm btn-ghost" onClick={() => setShowHub(true)}>Set up</button>}
         </div>
         <p className="muted" style={{ margin: 0 }}>
-          Optional. A hub sees every call routed through it — including coding tools — and adds running calls,
-          per-key caps, alert rules and controls.
+          Optional. Adds running calls, per-key caps, alert rules and controls.
         </p>
         {(showHub || hubHere) && (
           <>
@@ -169,7 +167,7 @@ export function Onboarding({ onPaired }: { onPaired: () => void }) {
             <input className="input" placeholder="Name for this hub (optional)" value={name} onChange={e => setName(e.target.value)} />
             <label className="check">
               <input type="checkbox" checked={control} onChange={e => setControl(e.target.checked)} />
-              Ask for control too (pause keys and providers, switch routes, acknowledge alerts)
+              Also allow control (pause, reroute, acknowledge alerts)
             </label>
             {error && <div className="error">{error}</div>}
           </>

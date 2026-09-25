@@ -98,7 +98,7 @@ function DeskButton({ page, warn }: { page: Settings["dock_button"]; warn: strin
 
 /** How much of today's budget the busiest provider has used, 0–1. */
 function budgetUsed(d: DeskState): number {
-  const top = Math.max(0, ...activeRows(d.rows).map(r => r.pct));
+  const top = Math.max(0, ...d.rows.filter(r => r.visible).map(r => r.pct));
   return Math.min(1, top / 100);
 }
 
@@ -161,7 +161,7 @@ function useIslandWindow(target: Box): Box {
 
 function Island({ d, settings }: { d: DeskState; settings: Settings }) {
   const p = phase(d);
-  const rows = activeRows(d.rows);
+  const rows = activeRows(d.rows, settings);
   const detailed = isDetailed(settings);
   const total = totalLabel(settings, d.spend);
   const warn = settings.show_alerts ? warningLine(d.alerts, d.rows, settings) : null;
@@ -406,7 +406,7 @@ function ProviderCard({
 function Dock({ d, settings }: { d: DeskState; settings: Settings }) {
   const p = phase(d);
   // Until the first numbers arrive, the dock is just the spinner: no rows showing 0.
-  const rows = p === "live" || p === "idle" ? activeRows(d.rows) : [];
+  const rows = p === "live" || p === "idle" ? activeRows(d.rows, settings) : [];
   const [hover, setHover] = useState<number | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const railRef = useRef<HTMLDivElement>(null);

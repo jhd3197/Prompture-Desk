@@ -10,12 +10,18 @@
 //! (no Python, no Prompture, or an older one), Desk sets up its own copy with
 //! the bundled `uv`, which brings its own Python and keeps everything inside
 //! Desk's data folder, so installing Desk is all a user has to do.
+//!
+//! Desk keeps its own copy current per the `prompture_updates` setting:
+//! upgraded daily before it starts (`auto`), offered in the UI when PyPI has a
+//! newer release (`ask`), or left alone (`off`). A Prompture the user installed
+//! is theirs to upgrade; Desk only reports when it's behind.
 
 use serde::{Deserialize, Serialize};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 pub const LOCAL_ID: &str = "local";
@@ -26,6 +32,9 @@ const UPDATE_EVERY: Duration = Duration::from_secs(24 * 60 * 60);
 /// What Desk's own copy installs; `PROMPTURE_DESK_PACKAGE` overrides it (a path or pin, for development).
 const PACKAGE: &str = "prompture>=1.13";
 const PYTHON: &str = "3.12";
+const PYPI_JSON: &str = "https://pypi.org/pypi/prompture/json";
+/// How long a PyPI answer is reused before asking again.
+const LATEST_TTL: Duration = Duration::from_secs(60 * 60);
 
 /// Serializes find-or-start: the live stream and the first data request both
 /// call [`ensure`] at startup, and must not launch two companions.
@@ -40,6 +49,27 @@ struct Managed {
 }
 
 static MANAGED: OnceLock<Managed> = OnceLock::new();
+
+/// Whether the companion Desk last started is its own copy (which Desk may upgrade).
+static RUNNING_OWN: AtomicBool = AtomicBool::new(false);
+
+const MODE_AUTO: u8 = 0;
+const MODE_ASK: u8 = 1;
+const MODE_OFF: u8 = 2;
+static UPDATE_MODE: AtomicU8 = AtomicU8::new(MODE_AUTO);
+
+/// The last PyPI answer and when it came.
+static LATEST: Mutex<Option<(Instant, String)>> = Mutex::new(None);
+
+/// Apply the `prompture_updates` setting: "auto", "ask" or "off".
+pub fn set_update_mode(mode: &str) {
+    let m = match mode {
+        "ask" => MODE_ASK,
+        "off" => MODE_OFF,
+        _ => MODE_AUTO,
+    };
+    UPDATE_MODE.store(m, Ordering::Relaxed);
+}
 
 /// Call once at startup. `report` receives setup progress text, then `None` when done.
 pub fn init(dir: PathBuf, report: impl Fn(Option<&str>) + Send + Sync + 'static) {
@@ -318,7 +348,7 @@ async fn start_managed(http: &reqwest::Client, owner_pid: u32) -> Result<LocalSt
         report(Some("Setting up Prompture — first run only, about a minute…"));
         install_managed(uv.clone(), m.dir.clone()).await?;
         let _ = std::fs::write(update_marker(&m.dir), now_secs().to_string());
-    } else if update_due(&m.dir) {
+    } else if UPDATE_MODE.load(Ordering::Relaxed) == MODE_AUTO && update_due(&m.dir) {
         report(Some("Checking for Prompture updates…"));
         update_managed(uv.clone(), m.dir.clone()).await;
     }
@@ -346,10 +376,14 @@ pub async fn ensure(http: &reqwest::Client, owner_pid: u32) -> Result<LocalState
         }
     }
     let own = match start_first(http, launchers(owner_pid)).await {
-        Ok(state) => return Ok(state),
+        Ok(state) => {
+            RUNNING_OWN.store(false, Ordering::Relaxed);
+            return Ok(state);
+        }
         Err(problem) => problem,
     };
     let result = start_managed(http, owner_pid).await;
+    RUNNING_OWN.store(result.is_ok(), Ordering::Relaxed);
     report(None);
     result.map_err(|managed| match (managed, own) {
         // Without a bundled uv, the user's own install is the more useful thing to report.
@@ -357,6 +391,149 @@ pub async fn ensure(http: &reqwest::Client, owner_pid: u32) -> Result<LocalState
         (LocalError::NotInstalled(_), Some(own)) => own,
         (managed, _) => managed,
     })
+}
+
+// ------------------------------------------------------------------ updates
+
+/// What the UI shows about the Prompture behind local mode.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct PromptureStatus {
+    /// "auto", "ask" or "off".
+    pub mode: &'static str,
+    /// "desk" (Desk's own copy, which Desk can upgrade) or "system" (one the
+    /// user installed); `None` when no companion is running.
+    pub source: Option<&'static str>,
+    /// The running companion's Prompture version.
+    pub version: Option<String>,
+    /// The newest release on PyPI; `None` when updates are off or PyPI is unreachable.
+    pub latest: Option<String>,
+    pub update_available: bool,
+}
+
+/// `MAJOR.MINOR.PATCH` as a comparable tuple, ignoring pre-release and build parts.
+fn parse_semver(s: &str) -> Option<(u64, u64, u64)> {
+    let core = s.trim().trim_start_matches('v').split(['-', '+']).next()?;
+    let mut it = core.split('.');
+    let major = it.next()?.parse().ok()?;
+    let minor = it.next().unwrap_or("0").parse().ok()?;
+    let patch = it.next().unwrap_or("0").parse().ok()?;
+    Some((major, minor, patch))
+}
+
+fn is_newer(latest: &str, current: &str) -> bool {
+    match (parse_semver(latest), parse_semver(current)) {
+        (Some(l), Some(c)) => l > c,
+        _ => false,
+    }
+}
+
+/// The newest Prompture on PyPI, cached for [`LATEST_TTL`].
+async fn latest_version(http: &reqwest::Client, fresh: bool) -> Option<String> {
+    if !fresh {
+        if let Some((at, v)) = LATEST.lock().unwrap().clone() {
+            if at.elapsed() < LATEST_TTL {
+                return Some(v);
+            }
+        }
+    }
+    let body: serde_json::Value =
+        http.get(PYPI_JSON).timeout(Duration::from_secs(8)).send().await.ok()?.error_for_status().ok()?.json().await.ok()?;
+    let version = body.get("info")?.get("version")?.as_str()?.to_string();
+    *LATEST.lock().unwrap() = Some((Instant::now(), version.clone()));
+    Some(version)
+}
+
+/// The running companion's version, without starting one.
+async fn running_version(http: &reqwest::Client) -> Option<String> {
+    let state = read_state()?;
+    let info: serde_json::Value = http
+        .get(format!("{}/v1/companion/info", state.url))
+        .timeout(Duration::from_secs(2))
+        .send()
+        .await
+        .ok()?
+        .json()
+        .await
+        .ok()?;
+    info.get("version")?.as_str().map(str::to_string)
+}
+
+/// Where the local Prompture stands. `fresh` skips the PyPI cache (a manual check).
+pub async fn status(http: &reqwest::Client, fresh: bool) -> PromptureStatus {
+    let mode = UPDATE_MODE.load(Ordering::Relaxed);
+    let version = running_version(http).await;
+    let latest = if mode == MODE_OFF { None } else { latest_version(http, fresh).await };
+    let update_available = matches!((&latest, &version), (Some(l), Some(v)) if is_newer(l, v));
+    PromptureStatus {
+        mode: match mode {
+            MODE_ASK => "ask",
+            MODE_OFF => "off",
+            _ => "auto",
+        },
+        source: version.as_ref().map(|_| if RUNNING_OWN.load(Ordering::Relaxed) { "desk" } else { "system" }),
+        version,
+        latest,
+        update_available,
+    }
+}
+
+/// End a companion by pid, so its files can be replaced.
+fn stop(pid: u32) {
+    #[cfg(windows)]
+    let mut cmd = {
+        let mut c = Command::new("taskkill");
+        c.args(["/PID", &pid.to_string(), "/T", "/F"]);
+        c
+    };
+    #[cfg(not(windows))]
+    let mut cmd = {
+        let mut c = Command::new("kill");
+        c.arg(pid.to_string());
+        c
+    };
+    cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    no_window(&mut cmd);
+    let _ = cmd.status();
+}
+
+/// Upgrade Desk's own Prompture now: stop its companion (Windows can't replace
+/// a running executable), upgrade, and start it again.
+pub async fn upgrade_now(http: &reqwest::Client, owner_pid: u32) -> Result<LocalState, LocalError> {
+    let (Some(m), Some(uv)) = (MANAGED.get(), uv_path()) else {
+        return Err(LocalError::Failed("Desk has no Prompture of its own to update.".into()));
+    };
+    if !managed_bin(&m.dir).is_file() {
+        return Err(LocalError::Failed("Desk hasn't set up its own Prompture yet.".into()));
+    }
+    if !RUNNING_OWN.load(Ordering::Relaxed) && read_state().is_some() {
+        return Err(LocalError::Failed(
+            "The Prompture running now is one you installed. Update it with: pipx upgrade prompture (or pip install -U prompture).".into(),
+        ));
+    }
+    {
+        let _one_at_a_time = ENSURE.lock().await;
+        report(Some("Updating Prompture…"));
+        if let Some(pid) = read_state().and_then(|s| s.pid) {
+            let _ = tauri::async_runtime::spawn_blocking(move || stop(pid)).await;
+            // Give the process a moment to let go of its files.
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+        let _ = std::fs::write(update_marker(&m.dir), now_secs().to_string());
+        let (uv, dir) = (uv.clone(), m.dir.clone());
+        let (ok, log) = tauri::async_runtime::spawn_blocking(move || {
+            run(uv_command(&uv, &dir, &["tool", "upgrade", "prompture"]), SETUP_TIMEOUT)
+        })
+        .await
+        .unwrap_or((false, String::new()));
+        *LATEST.lock().unwrap() = None;
+        if !ok {
+            report(None);
+            // Bring the old version back up before reporting the failure.
+            let _ = start_first(http, vec![launcher(managed_bin(&m.dir), &[], owner_pid)]).await;
+            return Err(LocalError::Failed(format!("Couldn't update Prompture.\n{}", tail(&log, 4))));
+        }
+    }
+    ensure(http, owner_pid).await
 }
 
 #[cfg(test)]
@@ -410,6 +587,24 @@ mod tests {
         std::fs::write(update_marker(&dir), now_secs().to_string()).unwrap();
         assert!(!update_due(&dir));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn versions_compare_by_release() {
+        assert!(is_newer("1.14.0", "1.13.2"));
+        assert!(is_newer("1.13.10", "1.13.9"));
+        assert!(!is_newer("1.13.2", "1.13.2"));
+        assert!(!is_newer("1.13.2", "1.14.0.dev3+g1a2b3c"));
+        assert!(!is_newer("garbage", "1.0.0"));
+        assert_eq!(parse_semver("v2.0"), Some((2, 0, 0)));
+    }
+
+    #[test]
+    fn update_mode_parses_with_auto_fallback() {
+        set_update_mode("off");
+        assert_eq!(UPDATE_MODE.load(Ordering::Relaxed), MODE_OFF);
+        set_update_mode("nonsense");
+        assert_eq!(UPDATE_MODE.load(Ordering::Relaxed), MODE_AUTO);
     }
 
     #[test]

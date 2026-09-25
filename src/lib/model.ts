@@ -125,18 +125,20 @@ export function providerRows(
       running: running.filter(r => providerOf(r.routed_to ?? r.model) === id).length,
       paused: isPaused,
       tone: isPaused ? "paused" : worst >= settings.warn_at ? "warn" : "ok",
-      value: tokensMode ? tokens(tokenCount) : usd(spendUsd),
+      value: tokenCount === 0 && spendUsd === 0 ? "—" : tokensMode ? tokens(tokenCount) : usd(spendUsd),
       budget: tokensMode ? tokens(pref.budget_tokens) : usd(pref.budget_usd),
     };
   });
 }
 
-/**
- * Rows worth showing in a widget: visible and doing something — usage today, a
- * rate or plan window, or a call in flight. Idle providers stay in Settings.
- */
-export function activeRows(rows: ProviderRow[]): ProviderRow[] {
-  return rows.filter(r => r.visible && (r.tokens > 0 || r.spendUsd > 0 || r.rateUsed != null || r.running > 0 || r.paused));
+/** Used today, or with a call in flight. */
+export function isUsed(r: ProviderRow): boolean {
+  return r.tokens > 0 || r.spendUsd > 0 || r.running > 0;
+}
+
+/** Rows to show: visible ones, and with `hide_unused` only those used today. */
+export function activeRows(rows: ProviderRow[], settings: Settings): ProviderRow[] {
+  return rows.filter(r => r.visible && (!settings.hide_unused || isUsed(r)));
 }
 
 export function totalLabel(settings: Settings, spend: Spend | null): { value: string; sub: string } {
