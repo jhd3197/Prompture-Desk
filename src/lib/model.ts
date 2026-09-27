@@ -1,7 +1,9 @@
 // Per-provider rows for the widgets: today's spend (or tokens) against the
 // user's daily budget, the tightest provider rate window, running calls and
 // whether the provider is paused on the hub.
-import { type Alert, type LiveEvent, type Limits, type ProviderPref, type Settings, type Spend, tokens, usd, windowName } from "./hub";
+import {
+  type Alert, type LiveEvent, type Limits, type ProviderPref, type Settings, type Spend, TOOL_NAMES, tokens, usd, windowName,
+} from "./hub";
 import { providerName, providerOf } from "./providers";
 
 export type Tone = "ok" | "warn" | "paused";
@@ -166,4 +168,44 @@ export function isDetailed(settings: Settings): boolean {
   if (settings.detail === "compact") return false;
   if (settings.detail === "detailed") return true;
   return navigator.userAgent.includes("Windows");
+}
+
+/** A coding agent at work right now. */
+export interface AgentWork {
+  tool: string;
+  name: string;
+  /** "waiting": stopped on a permission prompt (needs Claude Code's hooks). */
+  state: "working" | "waiting";
+  project: string | null;
+}
+
+/** The provider logo that stands for each coding agent. */
+export const AGENT_LOGO: Record<string, string> = {
+  claude: "claude", codex: "openai", kimi: "kimi", gemini: "gemini", qwen: "qwen", antigravity: "gemini",
+};
+
+/**
+ * One entry per agent with work in flight: a turn the companion saw in its
+ * logs, or requests it sends through the router. Waiting beats working.
+ */
+export function agentsAtWork(running: LiveEvent[]): AgentWork[] {
+  const byTool = new Map<string, AgentWork>();
+  for (const r of running) {
+    const tool = typeof r.tool === "string" ? r.tool : null;
+    if (!tool) continue;
+    const state = r.state === "waiting" ? "waiting" : "working";
+    const seen = byTool.get(tool);
+    if (!seen) {
+      byTool.set(tool, { tool, name: TOOL_NAMES[tool] ?? r.key_name ?? tool, state, project: r.project ?? null });
+      continue;
+    }
+    if (state === "waiting") seen.state = "waiting";
+    if (!seen.project && r.project) seen.project = r.project;
+  }
+  return [...byTool.values()];
+}
+
+/** "Claude Code working · shop", "Codex needs you". */
+export function agentLabel(a: AgentWork): string {
+  return `${a.name} ${a.state === "waiting" ? "needs you" : "working"}${a.project ? ` · ${a.project}` : ""}`;
 }

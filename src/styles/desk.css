@@ -108,7 +108,7 @@ body { font-family: var(--font-ui); color: var(--w-text); }
 .shim { display: block; height: 6px; border-radius: 3px; background: linear-gradient(90deg, var(--w-track) 0%, var(--w-faint) 50%, var(--w-track) 100%); background-size: 200% 100%; animation: pd-shim 1.4s linear infinite; }
 @keyframes pd-shim { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
 @media (prefers-reduced-motion: reduce) {
-  .pulse-dot, .spinner, .shim { animation-duration: 3s; }
+  .pulse-dot, .spinner, .shim, .agent-ring { animation-duration: 3s; }
   .island, .isl-layer, .dock, .dock-tab { transition: none !important; }
 }
 .warn-line { font-size: 12px; color: var(--warn-c); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -157,6 +157,15 @@ html:has(.widget-root), html:has(.widget-root) body { overflow: hidden; } /* a t
 .gauge-hub { fill: var(--w-sub); }
 .dock-state .state-label { font-size: 10.5px; }
 .dock-sep { width: 28px; height: 1px; background: var(--w-border); margin: 4px 0; }
+/* coding agents at work: a ring that pulses while working, amber while waiting on you */
+.agent-ring { position: relative; display: inline-flex; border-radius: 50%; padding: 2px; box-shadow: 0 0 0 1.5px var(--ok); animation: pd-pulse 1.6s ease-in-out infinite; }
+.agent-ring.waiting { box-shadow: 0 0 0 1.5px var(--warn-c); animation: none; }
+.dock-agent { width: 100%; border: 0; background: transparent; color: inherit; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; cursor: pointer; padding: 0; }
+.dock-agent:hover { background: var(--w-hover); }
+.dock-agent-label { font-size: 9.5px; color: var(--ok); white-space: nowrap; }
+.dock-agent-label.waiting, .isl-agent.waiting, .isl-agent-state.waiting { color: var(--warn-c); }
+.isl-agent { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--w-sub); white-space: nowrap; }
+.isl-agent-state { font-size: 11px; color: var(--ok); }
 .dock-row { width: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; }
 .dock-row.hover { background: var(--w-hover); }
 .dock-row .num { font-size: 10px; color: var(--w-sub); }

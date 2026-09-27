@@ -5,14 +5,11 @@ import { Check, Cloud, Play } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Segmented, Strip, Toggle, ago } from "../components/ui";
 import { type InstalledAgent, type Settings, type ToolUsage, type Tools, hub, tokens, usd } from "../lib/hub";
+import { AGENT_LOGO } from "../lib/model";
 import { ProviderLogo } from "../lib/providers";
 
 type Period = Tools["period"];
 
-/** The provider logo that stands for each agent. */
-const AGENT_LOGO: Record<string, string> = {
-  claude: "claude", codex: "openai", kimi: "kimi", gemini: "gemini", qwen: "qwen", antigravity: "gemini",
-};
 
 export function AgentLogo({ id, size = 22 }: { id: string; size?: number }) {
   return <ProviderLogo id={AGENT_LOGO[id] ?? id} size={size} />;

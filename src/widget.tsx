@@ -8,7 +8,9 @@ import { Mark } from "./components/Mark";
 import { Strip, useAppearance } from "./components/ui";
 import { duration, isActive, position, runSeconds, stepLabel, stepSeconds } from "./lib/automations";
 import { type Automation, type LiveEvent, type Settings, desk, hub, tokens, usd } from "./lib/hub";
-import { type ProviderRow, activeRows, isDetailed, totalLabel, warningLine } from "./lib/model";
+import {
+  AGENT_LOGO, type AgentWork, type ProviderRow, activeRows, agentLabel, agentsAtWork, isDetailed, totalLabel, warningLine,
+} from "./lib/model";
 import { ProviderLogo, providerName, providerOf } from "./lib/providers";
 import { type DeskState, useDesk } from "./lib/useDesk";
 import "./styles/app.css";
@@ -87,6 +89,15 @@ function useJustFinished(d: DeskState): LiveEvent | null {
 }
 
 function Pulse() { return <span className="pulse-dot" />; }
+
+/** A coding agent's logo in a ring: pulsing while it works, amber while it waits on you. */
+function AgentBadge({ a, size }: { a: AgentWork; size: number }) {
+  return (
+    <span className={`agent-ring ${a.state}`}>
+      <ProviderLogo id={AGENT_LOGO[a.tool] ?? a.tool} size={size} />
+    </span>
+  );
+}
 
 /** The queue the capsule shows: one running, or one that finished in the last minute. Ticks each second. */
 function useQueue(d: DeskState): Automation | null {
@@ -186,8 +197,9 @@ function Island({ d, settings }: { d: DeskState; settings: Settings }) {
   const done = useJustFinished(d);
   const connected = p === "live" || p === "idle";
   const queue = useQueue(d);
-  // A queue waiting on you stays out even when the capsule hides until hovered.
-  const needsYou = !!queue && queue.status === "paused";
+  const agents = agentsAtWork(d.running);
+  // A queue or an agent waiting on you stays out even when the capsule hides until hovered.
+  const needsYou = (!!queue && queue.status === "paused") || agents.some(a => a.state === "waiting");
 
   // Reveal on hover: leaving closes the panel too.
   useEffect(() => { if (!hovered && settings.visibility === "hover") setOpen(false); }, [hovered, settings.visibility]);
@@ -260,7 +272,13 @@ function Island({ d, settings }: { d: DeskState; settings: Settings }) {
           <span className="isl-sub">No calls yet today</span>
         </div>
         <div {...layer("live")}>
-          <Pulse />
+          {agents.length === 0 && <Pulse />}
+          {agents.map(a => (
+            <span key={a.tool} className={`isl-agent ${a.state}`} title={agentLabel(a)}>
+              <AgentBadge a={a} size={14} />
+              {detailed && <span>{a.state === "waiting" ? "needs you" : a.name}</span>}
+            </span>
+          ))}
           <span className="num isl-total">{total.value}</span>
           {rows.length > 0 && <span className="isl-sep" />}
           {rows.map(r => (
@@ -292,8 +310,18 @@ function Island({ d, settings }: { d: DeskState; settings: Settings }) {
               <span className="num isl-big">{total.value}</span>
               <span className="isl-sub">{total.sub}</span>
             </span>
-            <span className="isl-sub">{d.caps.running_calls ? `${d.running.length} running` : `${d.finished.length} calls · 30 min`}</span>
+            <span className="isl-sub">
+              {agents.length > 0 ? `${agents.length} at work` : d.caps.running_calls ? `${d.running.length} running` : `${d.finished.length} calls · 30 min`}
+            </span>
           </div>
+          {agents.map(a => (
+            <div key={a.tool} className="prow">
+              <AgentBadge a={a} size={16} />
+              <span className="prow-name">{a.name}</span>
+              <span className="isl-sub ellipsis">{a.project ?? ""}</span>
+              <span className={`isl-agent-state ${a.state}`}>{a.state === "waiting" ? "needs you" : "working"}</span>
+            </div>
+          ))}
           {rows.length === 0 && <div className="isl-sub">No provider traffic yet today.</div>}
           {rows.map(r => (
             <div key={r.id} className="prow">
@@ -459,6 +487,8 @@ function Dock({ d, settings }: { d: DeskState; settings: Settings }) {
   const railRef = useRef<HTMLDivElement>(null);
   const detailed = isDetailed(settings);
   const rowH = detailed ? 58 : 54;
+  const agents = p === "live" || p === "idle" ? agentsAtWork(d.running) : [];
+  const agentH = detailed ? 50 : 40;
   const total = totalLabel(settings, d.spend);
   const right = settings.dock_edge === "right";
 
@@ -552,6 +582,13 @@ function Dock({ d, settings }: { d: DeskState; settings: Settings }) {
           )}
         </div>
         <div className="dock-sep" />
+        {agents.map(a => (
+          <button key={a.tool} className="dock-agent" style={{ height: agentH }} title={`${agentLabel(a)} · open Desk`} onClick={() => desk.open("activity")}>
+            <AgentBadge a={a} size={22} />
+            {detailed && <span className={`dock-agent-label ${a.state}`}>{a.state === "waiting" ? "needs you" : "working"}</span>}
+          </button>
+        ))}
+        {agents.length > 0 && <div className="dock-sep" />}
         {rows.map((r, i) => (
           <div key={r.id} className={`dock-row ${hover === i ? "hover" : ""}`} style={{ height: rowH }} onMouseEnter={() => setHover(i)}>
             <span style={{ position: "relative" }}>
@@ -565,7 +602,7 @@ function Dock({ d, settings }: { d: DeskState; settings: Settings }) {
         <DeskButton page={settings.dock_button ?? "overview"} warn={settings.show_alerts ? warningLine(d.alerts, d.rows, settings) : null} />
       </div>
       {hovered && slid && (
-        <div style={{ marginTop: 10 + 46 + (hover ?? 0) * rowH - 10 }}>
+        <div style={{ marginTop: 10 + 46 + (agents.length ? agents.length * agentH + 9 : 0) + (hover ?? 0) * rowH - 10 }}>
           <ProviderCard row={hovered} warnAt={settings.warn_at} canPause={d.caps.provider_controls} onChanged={d.refresh} />
         </div>
       )}
