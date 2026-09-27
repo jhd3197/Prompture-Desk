@@ -30,11 +30,12 @@ const SETUP_TIMEOUT: Duration = Duration::from_secs(600);
 const UPDATE_TIMEOUT: Duration = Duration::from_secs(60);
 const UPDATE_EVERY: Duration = Duration::from_secs(24 * 60 * 60);
 /// The oldest Prompture whose companion has everything Desk uses (routing Claude
-/// Code and Codex, a clean shutdown). An older one Desk started is replaced by
+/// Code, Codex and Gemini CLI with call records, presets and fallback, shared
+/// project memory, a clean shutdown). An older one Desk started is replaced by
 /// Desk's own copy, and Desk's own copy is upgraded to at least this.
-pub const MIN_PROMPTURE: &str = "1.13.3";
+pub const MIN_PROMPTURE: &str = "1.13.4";
 /// What Desk's own copy installs; `PROMPTURE_DESK_PACKAGE` overrides it (a path or pin, for development).
-const PACKAGE: &str = "prompture>=1.13.3";
+const PACKAGE: &str = "prompture>=1.13.4";
 const PYTHON: &str = "3.12";
 const PYPI_JSON: &str = "https://pypi.org/pypi/prompture/json";
 /// How long a PyPI answer is reused before asking again.

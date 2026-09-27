@@ -70,6 +70,10 @@ export interface Capabilities {
   agent_turns?: boolean;
   /** Local companion only: Claude Code and Codex can be routed through it (/v1/router). */
   router?: boolean;
+  /** Local companion only: routed calls are recorded, with presets, fallback and task controls. */
+  router_calls?: boolean;
+  /** Local companion only: Gemini CLI can be routed too. */
+  gemini_routing?: boolean;
   /** Local companion only: shared project notes for coding agents (/v1/memory). */
   memory?: boolean;
 }
@@ -131,7 +135,7 @@ export interface MemoryProject {
 
 /** A CLI the companion can route. `routed`: its config points at the companion right now. */
 export interface RouterTool {
-  id: "claude-code" | "codex";
+  id: "claude-code" | "codex" | "gemini-cli";
   name: string;
   installed: boolean;
   enabled: boolean;
@@ -158,6 +162,10 @@ export interface Routes {
   fallback?: { models: string[]; allow_paid: boolean };
   escalation?: { enabled?: boolean; after_failures?: number; after_repeats?: number; to?: string };
   budget?: { task_usd?: number; task_attempts?: number; on_exceed?: "native" | "stop" };
+  /** A model on this PC for some request kinds, and first in line when a call fails. */
+  local?: { model?: string; kinds?: string[]; fallback?: boolean };
+  /** Reuse answers to near-identical background requests (titles). */
+  cache?: { enabled?: boolean; kinds?: string[]; similarity?: number };
 }
 
 export interface RouterState {
@@ -174,6 +182,7 @@ export interface RouterState {
     fallback: { models: string[]; allow_paid: boolean };
     escalation: { enabled: boolean; after_failures: number; after_repeats: number; to: string };
     budget: { task_usd: number | null; task_attempts: number; on_exceed: "native" | "stop" };
+    local?: { model: string | null; kinds: string[]; fallback: boolean };
   };
 }
 
@@ -186,7 +195,7 @@ export interface RoutedCall {
   endpoint: string;
   requested: string;
   served: string;
-  route: "passthrough" | "native" | "routed";
+  route: "passthrough" | "native" | "routed" | "cached";
   rule: { source: string; match: string | null; target: string | null; preset: string | null; reason: string };
   billing: "subscription" | "api" | "local" | "unknown";
   original_billing: RoutedCall["billing"];
@@ -224,6 +233,8 @@ export interface RouterTask {
   attempts: number;
   spent_usd: number;
   escalations: Array<{ at: number; reason: string; to: string | null; blocked?: string }>;
+  pending_switch?: { to: string; now: boolean; at: number } | null;
+  switches?: Array<{ at: number; to: string; now: boolean }>;
   waiting: boolean;
 }
 
@@ -355,6 +366,8 @@ export interface Automation {
   created_at: number;
   ended_at: number | null;
   note: string | null;
+  /** The agent is picked by plan left and may change between fresh sessions. */
+  auto?: boolean;
   stop: { fail: boolean; ask: boolean; limit: boolean; cost_usd: number | null };
   cost_usd: number;
   duration_s: number;
@@ -558,6 +571,9 @@ export const hub = {
   routerCalls: (period: Savings["period"], routedOnly: boolean) =>
     call<RoutedCall[]>("GET", `/v1/router/calls?period=${period}&tz_offset=${TZ()}&limit=200${routedOnly ? "&routed=true" : ""}`),
   routerCall: (id: string) => call<RoutedCall>("GET", `/v1/router/calls/${encodeURIComponent(id)}`),
+  switchTask: (tool: string, session: string, to: string, now: boolean) =>
+    call<{ task: RouterTask }>(
+      "POST", `/v1/router/sessions/${encodeURIComponent(tool)}/${encodeURIComponent(session)}/switch`, { to, now }),
   escalateTask: (tool: string, session: string, reason: string) =>
     call<{ escalated: boolean; task: RouterTask }>(
       "POST", `/v1/router/sessions/${encodeURIComponent(tool)}/${encodeURIComponent(session)}/escalate`, { reason }),

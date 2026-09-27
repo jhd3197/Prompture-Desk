@@ -87,6 +87,7 @@ function Detail({ call, onEscalated }: { call: RoutedCall; onEscalated: () => vo
   const [full, setFull] = useState<RoutedCall | null>(null);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  const [to, setTo] = useState("");
   useEffect(() => { hub.routerCall(call.id).then(setFull).catch(() => setFull(call)); }, [call]);
   const c = full ?? call;
   const task = c.task;
@@ -97,6 +98,15 @@ function Detail({ call, onEscalated }: { call: RoutedCall; onEscalated: () => vo
     try {
       const r = await hub.escalateTask(c.tool, c.session, "asked from Desk");
       setNote(r.escalated ? "The task moves to a stronger model from its next call." : "Nothing stronger to move to, or the task budget is spent.");
+      onEscalated();
+    } catch (e) { setNote(String(e).replace(/^Error:\s*/, "")); } finally { setBusy(false); }
+  };
+  const switchTo = async (now: boolean) => {
+    if (!c.session || !to.trim()) return;
+    setBusy(true);
+    try {
+      await hub.switchTask(c.tool, c.session, to.trim(), now);
+      setNote(now ? `Switching to ${to.trim()} now.` : `Switching to ${to.trim()} at the next prompt.`);
       onEscalated();
     } catch (e) { setNote(String(e).replace(/^Error:\s*/, "")); } finally { setBusy(false); }
   };
@@ -131,7 +141,17 @@ function Detail({ call, onEscalated }: { call: RoutedCall; onEscalated: () => vo
           {task.escalations.map((e, i) => (
             <span key={i} className="d-prov-sub">{e.to ? `Escalated to ${e.to}` : `Not escalated (${e.blocked})`}: {e.reason}</span>
           ))}
-          <span><button className="s-btn sm" disabled={busy} onClick={escalate}>Use a stronger model</button></span>
+          {task.pending_switch && <span className="d-prov-sub">Switching to {task.pending_switch.to} at the next prompt.</span>}
+          <span className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+            <button className="s-btn sm" disabled={busy} onClick={escalate}>Use a stronger model</button>
+            <input className="s-addr mono r-input sv-switch" list="sv-switch-to" placeholder="original, native:…, ollama/…"
+              value={to} onChange={e => setTo(e.target.value)} aria-label="Switch this task to" />
+            <datalist id="sv-switch-to">
+              {["original", "native:small", "native:mid", "native:large"].map(m => <option key={m} value={m} />)}
+            </datalist>
+            <button className="s-btn sm" disabled={busy || !to.trim()} onClick={() => switchTo(false)} title="Keeps the prompt cache until then">Switch next prompt</button>
+            <button className="s-btn sm ghost" disabled={busy || !to.trim()} onClick={() => switchTo(true)}>Now</button>
+          </span>
           {note && <span className="d-prov-sub">{note}</span>}
         </span></div>
       )}

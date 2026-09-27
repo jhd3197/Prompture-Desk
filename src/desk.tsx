@@ -324,7 +324,7 @@ function DeskWindow() {
               {page === "activity" && <ActivityPage d={d} settings={s} />}
               {page === "tools" && <ToolsView settings={s} enabled={!!d.caps.coding_tools} />}
               {page === "routing" && <RoutingView enabled={!!d.caps.router} spend={d.spend} statusKey={d.status.state} />}
-              {page === "savings" && <SavingsView enabled={!!d.caps.router} />}
+              {page === "savings" && <SavingsView enabled={!!d.caps.router_calls} />}
               {page === "memory" && <MemoryView enabled={!!d.caps.memory} />}
               {page === "automations" && <AutomationsPage d={d} />}
               {page === "limits" && <div className="d-view"><HeadroomView d={d} /></div>}

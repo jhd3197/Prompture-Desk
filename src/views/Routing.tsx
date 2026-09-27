@@ -11,9 +11,15 @@ import { AGENT_LOGO } from "../lib/model";
 import { ProviderLogo } from "../lib/providers";
 import { usePrompture } from "../lib/updater";
 
-const TOOL_AGENT: Record<RouterTool["id"], string> = { "claude-code": "claude", codex: "codex" };
-const VENDOR: Record<RouterTool["id"], string> = { "claude-code": "Anthropic", codex: "OpenAI" };
-const MODEL_HINT: Record<RouterTool["id"], string> = { "claude-code": "claude-haiku-*", codex: "gpt-*-mini" };
+const TOOL_AGENT: Record<RouterTool["id"], string> = { "claude-code": "claude", codex: "codex", "gemini-cli": "gemini" };
+const VENDOR: Record<RouterTool["id"], string> = { "claude-code": "Anthropic", codex: "OpenAI", "gemini-cli": "Google" };
+const MODEL_HINT: Record<RouterTool["id"], string> = {
+  "claude-code": "claude-haiku-*", codex: "gpt-*-mini", "gemini-cli": "gemini-*-pro",
+};
+/** Said under a routed tool when routing has limits worth knowing. */
+const ROUTED_NOTE: Partial<Record<RouterTool["id"], string>> = {
+  "gemini-cli": "Google sign-in only. Projects with their own .env go direct.",
+};
 
 const PRESET_NAMES: Record<Preset, string> = { quality: "Quality", balanced: "Balanced", economy: "Economy" };
 /** Preset choices; "" = none here (the next level up decides). */
@@ -70,7 +76,9 @@ function ToolRow({ tool, onChange }: { tool: RouterTool; onChange: (on: boolean)
       <ProviderLogo id={AGENT_LOGO[TOOL_AGENT[tool.id]]} size={24} />
       <div className="grow stack" style={{ gap: 2 }}>
         <span className="d-prov-name">{tool.name}</span>
-        <span className="d-prov-sub" title={tool.routed ? tool.config : undefined}>{sub}</span>
+        <span className="d-prov-sub" title={tool.routed ? tool.config : undefined}>
+          {sub}{tool.enabled && ROUTED_NOTE[tool.id] ? ` · ${ROUTED_NOTE[tool.id]}` : ""}
+        </span>
       </div>
       <Toggle
         on={tool.enabled}
@@ -246,6 +254,41 @@ function LimitsCard({ state, models, onSave }: {
   );
 }
 
+/** A model on this PC for titles and failed calls, and reuse of title answers. */
+function LocalCard({ routes, models, onSave }: { routes: Routes; models: string[]; onSave: (r: Routes) => Promise<void> }) {
+  const [model, setModel] = useState(routes.local?.model ?? "");
+  useEffect(() => setModel(routes.local?.model ?? ""), [routes.local?.model]);
+  const local = { kinds: ["title"], fallback: false, ...routes.local };
+  const titles = (local.kinds ?? []).includes("title");
+  const save = (patch: Partial<NonNullable<Routes["local"]>>) =>
+    onSave({ ...routes, local: { ...local, model: model.trim() || undefined, ...patch } });
+  return (
+    <section className="d-card">
+      <header className="d-card-head"><h3>On this PC</h3></header>
+      <label className="r-line">
+        <span className="r-label">Local model</span>
+        <input className="s-addr mono r-input" list="r-local-models" placeholder="ollama/qwen3:8b" value={model}
+          onChange={e => setModel(e.target.value)} onBlur={() => { if (model.trim() !== (routes.local?.model ?? "")) void save({}); }} />
+      </label>
+      <datalist id="r-local-models">{models.filter(m => /^(ollama|lmstudio|llamacpp)\//.test(m)).map(m => <option key={m} value={m} />)}</datalist>
+      <div className="r-line">
+        <span className="r-label grow">Use it for titles</span>
+        <Toggle on={titles} label="Local model for titles"
+          onChange={v => save({ kinds: v ? [...new Set([...(local.kinds ?? []), "title"])] : (local.kinds ?? []).filter(k => k !== "title") })} />
+      </div>
+      <div className="r-line">
+        <span className="r-label grow">Try it first when a call fails</span>
+        <Toggle on={!!local.fallback} label="Local model as first fallback" onChange={v => save({ fallback: v })} />
+      </div>
+      <div className="r-line">
+        <span className="r-label grow">Reuse titles for near-identical prompts</span>
+        <Toggle on={!!routes.cache?.enabled} label="Reuse title answers"
+          onChange={v => onSave({ ...routes, cache: { ...routes.cache, enabled: v } })} />
+      </div>
+    </section>
+  );
+}
+
 /** Shown while the companion has no router: an older Prompture, or none yet. */
 function NeedsPrompture({ statusKey }: { statusKey: unknown }) {
   const p = usePrompture(true, statusKey);
@@ -326,6 +369,7 @@ export function RoutingView({ enabled, spend, statusKey }: { enabled: boolean; s
 
       {on.length > 0 && state.presets && <ProjectsCard routes={state.routes} projects={projects} onSave={save} />}
       {on.length > 0 && <LimitsCard state={state} models={models} onSave={save} />}
+      {on.length > 0 && state.settings?.local && <LocalCard routes={state.routes} models={models} onSave={save} />}
 
       {claude?.installed && (
         <section className="d-card">
