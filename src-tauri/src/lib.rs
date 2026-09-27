@@ -14,6 +14,7 @@ mod hub;
 mod live;
 mod local;
 mod platform;
+mod projects;
 mod store;
 mod tray;
 mod vela;
@@ -413,6 +414,12 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_settings,
+            projects::list_projects,
+            projects::save_project,
+            projects::remove_project,
+            projects::project_catalog,
+            projects::launch_project,
+            projects::project_sessions,
             save_settings,
             probe_hub,
             discover_local,

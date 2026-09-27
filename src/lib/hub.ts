@@ -553,7 +553,7 @@ function call<T>(method: string, path: string, body?: unknown): Promise<T> {
 
 /** Pages of Desk's window, dashboard first, then settings. */
 export type Page =
-  | "overview" | "activity" | "tools" | "routing" | "savings" | "memory" | "automations" | "limits" | "alerts"
+  | "overview" | "activity" | "tools" | "projects" | "routing" | "savings" | "memory" | "automations" | "limits" | "alerts"
   | "widget" | "appearance" | "providers" | "notifications" | "connection" | "about";
 
 export const hub = {

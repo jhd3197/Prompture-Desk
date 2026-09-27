@@ -4,7 +4,7 @@
 import { listen } from "@tauri-apps/api/event";
 import {
   Activity, AppWindow, ArrowUpRight, Bell, BookMarked, Coins, Gauge, Info, Layers, LayoutDashboard, ListChecks, type LucideIcon, Palette,
-  Plug, Route, Settings as Gear, SquareTerminal, TriangleAlert, X, ChevronLeft,
+  Plug, Route, Settings as Gear, SquareTerminal, TriangleAlert, X, ChevronLeft, FolderOpen,
 } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useState } from "react";
@@ -30,9 +30,11 @@ import { MemoryView } from "./views/Memory";
 import { ToolsCard, ToolsView } from "./views/Tools";
 import { ActivityPage } from "./views/ActivityPage";
 import { AutomationsPage } from "./views/Automations";
+import { ProjectsView } from "./views/Projects";
 import { AlertsView, HeadroomView } from "./views/Views";
 
 const DASHBOARD: Array<[Page, string, LucideIcon]> = [
+  ["projects", "Projects", FolderOpen],
   ["overview", "Overview", LayoutDashboard], ["activity", "Activity", Activity], ["tools", "Coding tools", SquareTerminal],
   ["routing", "Routing", Route], ["savings", "Savings", Coins], ["memory", "Memory", BookMarked],
   ["automations", "Automations", ListChecks], ["providers", "Providers", Layers], ["limits", "Limits", Gauge],
@@ -323,6 +325,7 @@ function DeskWindow() {
               {page === "overview" && <Overview d={d} s={s} go={setPage} />}
               {page === "activity" && <ActivityPage d={d} settings={s} />}
               {page === "tools" && <ToolsView settings={s} enabled={!!d.caps.coding_tools} />}
+              {page === "projects" && <ProjectsView />}
               {page === "routing" && <RoutingView enabled={!!d.caps.router} spend={d.spend} statusKey={d.status.state} />}
               {page === "savings" && <SavingsView enabled={!!d.caps.router_calls} />}
               {page === "memory" && <MemoryView enabled={!!d.caps.memory} />}
