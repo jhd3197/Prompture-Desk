@@ -3,12 +3,16 @@
 //! Every parsed event is re-emitted to the webviews as `hub://live`, and the
 //! connection state as `hub://status`. The task reconnects with exponential
 //! backoff and resumes from the last event id, so a sleep/wake or a hub
-//! restart costs nothing but a short gap.
+//! restart costs nothing but a short gap. The calls running right now are
+//! kept too ([`running`]): a window that opens after the stream's snapshot
+//! still shows a coding agent that has been working for minutes.
 
 use crate::hub::{self, SseParser};
 use futures_util::StreamExt;
 use serde::Serialize;
 use serde_json::Value;
+use std::collections::BTreeMap;
+use std::sync::Mutex;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 
@@ -23,6 +27,57 @@ pub struct LiveStatus {
 impl Default for LiveStatus {
     fn default() -> Self {
         Self { state: "idle", message: None }
+    }
+}
+
+/// Calls running right now, by request id, as the stream last described them.
+static RUNNING: Mutex<BTreeMap<String, Value>> = Mutex::new(BTreeMap::new());
+
+/// Fold one stream event into [`RUNNING`].
+fn track(value: &Value) {
+    let Ok(mut running) = RUNNING.lock() else { return };
+    let id = value.get("request_id").and_then(Value::as_str).map(str::to_owned);
+    match value.get("type").and_then(Value::as_str) {
+        Some("snapshot") => {
+            running.clear();
+            for entry in value.get("running").and_then(Value::as_array).into_iter().flatten() {
+                if let Some(id) = entry.get("request_id").and_then(Value::as_str) {
+                    running.insert(id.to_owned(), entry.clone());
+                }
+            }
+        }
+        Some("request.started") => {
+            if let Some(id) = id {
+                running.insert(id, value.clone());
+            }
+        }
+        Some("request.first_token" | "request.activity") => {
+            let entry = id.and_then(|id| running.get_mut(&id)).and_then(Value::as_object_mut);
+            if let (Some(entry), Some(update)) = (entry, value.as_object()) {
+                for (key, field) in update {
+                    if key != "type" && key != "id" {
+                        entry.insert(key.clone(), field.clone());
+                    }
+                }
+            }
+        }
+        Some("request.finished" | "request.ended") => {
+            if let Some(id) = id {
+                running.remove(&id);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The calls running right now, for a window that just opened.
+pub fn running() -> Vec<Value> {
+    RUNNING.lock().map(|r| r.values().cloned().collect()).unwrap_or_default()
+}
+
+fn clear_running() {
+    if let Ok(mut running) = RUNNING.lock() {
+        running.clear();
     }
 }
 
@@ -45,7 +100,10 @@ pub enum Source {
 /// Run until the task is aborted (another hub was selected) or the token is refused.
 pub async fn run(app: AppHandle, source: Source) {
     let http = hub::client();
+    clear_running();
     let mut last_id: Option<String> = None;
+    // A restarted local companion numbers its events from 1 again: resume only from the same one.
+    let mut last_token: Option<String> = None;
     let mut backoff = Duration::from_secs(1);
     loop {
         status(&app, "connecting", None);
@@ -61,6 +119,10 @@ pub async fn run(app: AppHandle, source: Source) {
                 }
             },
         };
+        if last_token.as_deref() != Some(token.as_str()) {
+            last_id = None;
+            last_token = Some(token.clone());
+        }
         let mut req = http.get(format!("{base}/v1/live")).bearer_auth(&token);
         if let Some(id) = &last_id {
             req = req.header("Last-Event-ID", id);
@@ -86,6 +148,7 @@ pub async fn run(app: AppHandle, source: Source) {
                             last_id = None;
                         }
                         if let Ok(value) = serde_json::from_str::<Value>(&ev.data) {
+                            track(&value);
                             let _ = app.emit("hub://live", value);
                         }
                     }
@@ -97,5 +160,27 @@ pub async fn run(app: AppHandle, source: Source) {
         }
         tokio::time::sleep(backoff).await;
         backoff = (backoff * 2).min(MAX_BACKOFF);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn running_follows_the_stream() {
+        clear_running();
+        track(&json!({"type": "snapshot", "running": [{"request_id": "a", "state": "working"}]}));
+        track(&json!({"type": "request.started", "request_id": "b", "tool": "codex"}));
+        track(&json!({"type": "request.activity", "request_id": "a", "state": "waiting", "id": 7}));
+        track(&json!({"type": "request.activity", "request_id": "gone", "state": "waiting"}));
+        let now = running();
+        assert_eq!(now.len(), 2);
+        assert_eq!(now[0]["state"], "waiting");
+        assert!(now[0].get("id").is_none());
+        track(&json!({"type": "request.ended", "request_id": "a"}));
+        track(&json!({"type": "request.finished", "request_id": "b"}));
+        assert!(running().is_empty());
     }
 }

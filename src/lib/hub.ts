@@ -62,6 +62,36 @@ export interface Capabilities {
   activity?: boolean;
   /** Local companion only: queued coding-agent steps (/v1/automations). */
   automations?: boolean;
+  /** Local companion only: coding agents' turns show as running calls. */
+  agent_turns?: boolean;
+  /** Local companion only: Claude Code and Codex can be routed through it (/v1/router). */
+  router?: boolean;
+}
+
+/** A CLI the companion can route. `routed`: its config points at the companion right now. */
+export interface RouterTool {
+  id: "claude-code" | "codex";
+  name: string;
+  installed: boolean;
+  enabled: boolean;
+  routed: boolean;
+  url: string;
+  config: string;
+}
+
+/** Per tool: requested-model patterns and request kinds ("background", "main", …) → a Prompture model. */
+export interface RouteRules {
+  models: Record<string, string>;
+  kinds: Record<string, string>;
+}
+
+export interface RouterState {
+  url: string;
+  tools: RouterTool[];
+  hooks: { claude: boolean };
+  routes: { tools: Record<string, RouteRules> };
+  kinds: string[];
+  background_kinds: string[];
 }
 
 export interface HubInfo {
@@ -327,6 +357,8 @@ export const desk = {
   removeHub: (id: string) => invoke<Settings>("remove_hub", { id }),
   reconnect: () => invoke<void>("reconnect_live"),
   liveStatus: () => invoke<LiveStatus>("live_status"),
+  /** Calls running right now, for a window that opened after the stream's snapshot. */
+  liveRunning: () => invoke<LiveEvent[]>("live_running"),
   updateTray: (summary: {
     state: string;
     bars: Array<{ fraction: number; tone: "ok" | "warn" | "paused" }>;
@@ -344,7 +376,7 @@ function call<T>(method: string, path: string, body?: unknown): Promise<T> {
 
 /** Pages of Desk's window, dashboard first, then settings. */
 export type Page =
-  | "overview" | "activity" | "tools" | "automations" | "limits" | "alerts"
+  | "overview" | "activity" | "tools" | "routing" | "automations" | "limits" | "alerts"
   | "widget" | "appearance" | "providers" | "notifications" | "connection" | "about";
 
 export const hub = {
@@ -354,6 +386,10 @@ export const hub = {
   spend: (period: "day" | "week" | "month" = "day", sources: "all" | "api" = "all") =>
     call<Spend>("GET", `/v1/spend?period=${period}&tz_offset=${TZ()}${sources === "api" ? "&sources=api" : ""}`),
   setClaudePlan: (enabled: boolean) => call<{ claude_plan_usage: boolean }>("POST", "/v1/tools/claude-plan", { enabled }),
+  router: () => call<RouterState>("GET", "/v1/router"),
+  setRouting: (tool: RouterTool["id"], enabled: boolean) => call<RouterState>("POST", `/v1/router/tools/${tool}`, { enabled }),
+  setAgentHooks: (enabled: boolean) => call<RouterState>("POST", "/v1/router/hooks", { enabled }),
+  saveRoutes: (routes: RouterState["routes"]) => call<RouterState>("POST", "/v1/router/routes", routes),
   alerts: () => call<Alert[]>("GET", "/v1/alerts?limit=50"),
   tools: (period: "day" | "week" | "month" = "day") => call<Tools>("GET", `/v1/tools?period=${period}&tz_offset=${TZ()}`),
   /** Calls that finished in the last `minutes` (local companion), to fill views on connect. */

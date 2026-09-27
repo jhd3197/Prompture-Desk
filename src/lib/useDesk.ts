@@ -12,7 +12,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { automationNotice, isActive, isEnded } from "./automations";
 import {
   type Alert, type Automation, type Automations, type Capabilities, type LiveEvent, type LiveStatus, type Limits,
-  type Settings, type Spend, HUB_CAPABILITIES, desk, hub,
+  type Settings, type Spend, HUB_CAPABILITIES, TOOL_NAMES, desk, hub,
 } from "./hub";
 import { tr } from "./i18n";
 import { type ProviderRow, providerRows, totalLabel } from "./model";
@@ -54,6 +54,8 @@ export function useDesk({ primary }: { primary: boolean }): DeskState {
   const [status, setStatus] = useState<LiveStatus>({ state: "connecting", message: null });
   const [setup, setSetup] = useState<string | null>(null);
   const [running, setRunning] = useState<Record<string, LiveEvent>>({});
+  const runningRef = useRef(running);
+  runningRef.current = running;
   const [finished, setFinished] = useState<LiveEvent[]>([]);
   const [limits, setLimits] = useState<Limits | null>(null);
   const [spend, setSpend] = useState<Spend | null>(null);
@@ -181,6 +183,9 @@ export function useDesk({ primary }: { primary: boolean }): DeskState {
   useEffect(() => {
     // The stream may have connected before this window loaded.
     desk.liveStatus().then(setStatus).catch(() => undefined);
+    desk.liveRunning()
+      .then(list => setRunning(r => (Object.keys(r).length ? r : Object.fromEntries(list.map(e => [e.request_id as string, e])))))
+      .catch(() => undefined);
     const unlisten = [
       listen<LiveStatus>("hub://status", e => setStatus(e.payload)),
       listen<string | null>("desk://local-setup", e => setSetup(e.payload)),
@@ -199,6 +204,17 @@ export function useDesk({ primary }: { primary: boolean }): DeskState {
             if (ev.request_id) {
               const id = ev.request_id;
               setRunning(r => (r[id] ? { ...r, [id]: { ...r[id], ...ev, type: "request.started" } } : r));
+              const was = runningRef.current[id];
+              if (ev.state === "waiting" && was && was.state !== "waiting" && typeof was.tool === "string" && prefs?.notify_alerts) {
+                const name = TOOL_NAMES[was.tool] ?? was.key_name ?? "A coding agent";
+                notify(`${name} needs you`, was.project ? `Waiting for you in ${was.project}.` : "Waiting for your answer.");
+              }
+            }
+            break;
+          case "request.ended": // a coding agent's turn is over; its calls arrive as request.finished
+            if (ev.request_id) {
+              const id = ev.request_id;
+              setRunning(r => { const next = { ...r }; delete next[id]; return next; });
             }
             break;
           case "request.finished": {

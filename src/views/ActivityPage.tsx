@@ -94,7 +94,7 @@ export function ActivityPage({ d, settings }: { d: DeskState; settings: Settings
         <Stat label="Tokens" value={tokens(totalTokens)} sub={totalCost > 0 ? `≈ ${usd(totalCost)}` : undefined} />
         <Stat label="Failed" value={count(failed)} sub={events.length ? `${Math.round((failed / events.length) * 100)}% of calls` : "none"} />
         <Stat label="Typical call" value={median != null ? `${(median / 1000).toFixed(1)}s` : "—"} sub="median duration" />
-        {d.caps.running_calls && <Stat label="Running now" value={count(d.running.length)} sub="through the hub" />}
+        {d.caps.running_calls && <Stat label="Running now" value={count(d.running.length)} sub={d.mode === "hub" ? "through the hub" : "on this PC"} />}
       </div>
 
       <ActivityHeatmap settings={settings} enabled={!!d.caps.activity} />
@@ -131,8 +131,8 @@ export function ActivityPage({ d, settings }: { d: DeskState; settings: Settings
           <header className="d-card-head"><h3>Running now</h3></header>
           {d.running.map(e => (
             <div key={e.request_id} className="a-call">
-              <span className={`pulse ${e.state === "waiting" ? "waiting" : ""}`} />
-              <span className="mono ellipsis">{e.routed_to ?? e.model}</span>
+              <span className={`pulse ${e.state === "waiting" ? "waiting" : ""}`} title={e.state === "waiting" ? "Waiting on you" : "Working"} />
+              <span className="mono ellipsis">{e.routed_to ? `${e.model} → ${e.routed_to}` : e.model}</span>
               <span className="d-call-sub ellipsis">{[sourceOf(e), e.project].filter(Boolean).join(" · ")}</span>
               <span className="d-call-ago">{ago(e.ts)}</span>
             </div>

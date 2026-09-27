@@ -20,9 +20,12 @@ function asProblem(e: unknown): LocalProblem {
   return { code: "failed", message: String(e) };
 }
 
-export function Onboarding({ onPaired }: { onPaired: () => void }) {
+/** `auto` starts local mode right away: Desk can't show anything without it, so a first
+ *  launch shouldn't wait for a click. */
+export function Onboarding({ onPaired, auto = false }: { onPaired: () => void; auto?: boolean }) {
   const [step, setStep] = useState<Step>({ kind: "choose" });
-  const [local, setLocal] = useState<LocalState>({ kind: "idle" });
+  const [local, setLocal] = useState<LocalState>(auto ? { kind: "working", text: "Setting up Prompture…" } : { kind: "idle" });
+  const started = useRef(false);
   const [hubHere, setHubHere] = useState<{ url: string; info: HubInfo } | null>(null);
   const [showHub, setShowHub] = useState(false);
   const [url, setUrl] = useState("");
@@ -47,7 +50,7 @@ export function Onboarding({ onPaired }: { onPaired: () => void }) {
 
   // ---------------------------------------------------------- local mode
   const useLocal = async () => {
-    setLocal({ kind: "working", text: "Starting Prompture on this PC…" });
+    setLocal({ kind: "working", text: "Setting up Prompture…" });
     try {
       await desk.connectLocal();
       onPaired();
@@ -55,6 +58,13 @@ export function Onboarding({ onPaired }: { onPaired: () => void }) {
       setLocal({ kind: "problem", problem: asProblem(e) });
     }
   };
+
+  useEffect(() => {
+    if (!auto || started.current) return;
+    started.current = true;
+    useLocal();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [auto]);
 
   // ---------------------------------------------------------- hub pairing
   const pair = async (target: string) => {

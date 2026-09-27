@@ -302,6 +302,12 @@ fn live_status(state: State<'_, AppState>) -> live::LiveStatus {
     state.status.lock().unwrap().clone()
 }
 
+/// The calls running right now (a window that opens late missed the stream's snapshot).
+#[tauri::command]
+fn live_running() -> Vec<Value> {
+    live::running()
+}
+
 #[tauri::command]
 fn reconnect_live(app: AppHandle, state: State<'_, AppState>) {
     restart_live(&app, &state);
@@ -417,6 +423,7 @@ pub fn run() {
             remove_hub,
             reconnect_live,
             live_status,
+            live_running,
             update_tray,
             open_dashboard,
             open_desk,

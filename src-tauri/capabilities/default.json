@@ -18,6 +18,7 @@
     "notification:default",
     "dialog:allow-open",
     "opener:allow-open-url",
+    "opener:allow-default-urls",
     "window-state:default",
     "updater:default",
     "process:allow-restart"
