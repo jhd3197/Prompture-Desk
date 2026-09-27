@@ -58,6 +58,36 @@ write its 5-hour and weekly windows to disk; Prompture can read them the way Cla
 Claude Code's own login, but only if you opt in with `PROMPTURE_CLAUDE_PLAN_USAGE=1`. Turn all
 coding-tool reading off by running the companion with `--no-coding-tools`.
 
+## Projects
+
+On Windows, **Desk › Projects** saves a local folder and launches a coding CLI there:
+**Project → Model → Agent → Launch in terminal**. Choose a discovered Prompture model
+or enter a normalized `provider/model` name, then select Claude Code or Codex CLI.
+Launching also saves the project's defaults for next time. The CLI must be installed
+on `PATH`; restart Desk after installing it.
+
+Each terminal owns a separate, loopback-only Prompture proxy with its model pinned
+for that session. Changing another project's selection does not affect it. The
+launcher leaves global agent configuration and shared routing rules untouched,
+keeps normal CLI permission prompts, and reports an error instead of silently
+falling back to the agent's original vendor. Known models without tool support are
+blocked; unknown compatibility is labeled rather than assumed. Provider credentials
+come from the local Prompture runtime, including when Desk is connected to a remote hub.
+
+This requires a current local Prompture installation with companion routing support
+(the same router used by Desk's Routing page). Desk checks its managed Python runtime
+and then Python installations on `PATH`. If neither supports routing, update local
+Prompture in Connection settings. Discovery and launch errors appear in Projects.
+Session status covers terminals opened during the current Desk run. Closing a terminal
+ends its session; removing a saved project does not delete its folder or stop its agents.
+
+The CLI adapters use Claude Code's [gateway configuration](https://code.claude.com/docs/en/llm-gateway)
+and Codex's [custom provider configuration](https://developers.openai.com/codex/config-reference/).
+Translation is provided by Prompture; individual models may not support every agent feature.
+
+Proxy integration tests (no paid model requests) can be run using Python from a current
+Prompture environment: `python -m unittest discover -s tests -v`.
+
 ## Automations
 
 **Desk › Automations** queues coding-agent steps that run one after another, like pre-moves: pick a

@@ -5,6 +5,7 @@ src-tauri/gen/
 *.log
 .DS_Store
 *.tsbuildinfo
+__pycache__/
 src-tauri/binaries/
 .updater/
 /graphify-out
