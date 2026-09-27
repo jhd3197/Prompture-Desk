@@ -183,6 +183,9 @@ export function useDesk({ primary }: { primary: boolean }): DeskState {
   useEffect(() => {
     // The stream may have connected before this window loaded.
     desk.liveStatus().then(setStatus).catch(() => undefined);
+    desk.liveRunning()
+      .then(list => setRunning(r => (Object.keys(r).length ? r : Object.fromEntries(list.map(e => [e.request_id as string, e])))))
+      .catch(() => undefined);
     const unlisten = [
       listen<LiveStatus>("hub://status", e => setStatus(e.payload)),
       listen<string | null>("desk://local-setup", e => setSetup(e.payload)),

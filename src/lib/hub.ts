@@ -357,6 +357,8 @@ export const desk = {
   removeHub: (id: string) => invoke<Settings>("remove_hub", { id }),
   reconnect: () => invoke<void>("reconnect_live"),
   liveStatus: () => invoke<LiveStatus>("live_status"),
+  /** Calls running right now, for a window that opened after the stream's snapshot. */
+  liveRunning: () => invoke<LiveEvent[]>("live_running"),
   updateTray: (summary: {
     state: string;
     bars: Array<{ fraction: number; tone: "ok" | "warn" | "paused" }>;
