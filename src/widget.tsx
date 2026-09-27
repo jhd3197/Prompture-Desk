@@ -9,7 +9,7 @@ import { Strip, useAppearance } from "./components/ui";
 import { duration, isActive, position, runSeconds, stepLabel, stepSeconds } from "./lib/automations";
 import { type Automation, type LiveEvent, type Settings, desk, hub, tokens, usd } from "./lib/hub";
 import {
-  AGENT_LOGO, type AgentWork, type ProviderRow, activeRows, agentLabel, agentsAtWork, isDetailed, totalLabel, warningLine,
+  type AgentWork, type ProviderRow, activeRows, agentLabel, agentOn, agentsAtWork, isDetailed, totalLabel, warningLine,
 } from "./lib/model";
 import { ProviderLogo, providerName, providerOf } from "./lib/providers";
 import { type DeskState, useDesk } from "./lib/useDesk";
@@ -90,13 +90,10 @@ function useJustFinished(d: DeskState): LiveEvent | null {
 
 function Pulse() { return <span className="pulse-dot" />; }
 
-/** A coding agent's logo in a ring: pulsing while it works, amber while it waits on you. */
-function AgentBadge({ a, size }: { a: AgentWork; size: number }) {
-  return (
-    <span className={`agent-ring ${a.state}`}>
-      <ProviderLogo id={AGENT_LOGO[a.tool] ?? a.tool} size={size} />
-    </span>
-  );
+/** A provider's logo; ringed while a coding agent works on it (amber while it waits on you). */
+function RowLogo({ id, size, dim, agent }: { id: string; size: number; dim?: boolean; agent?: AgentWork }) {
+  const logo = <ProviderLogo id={id} size={size} dim={dim} />;
+  return agent ? <span className={`agent-ring ${agent.state}`} title={agentLabel(agent)}>{logo}</span> : logo;
 }
 
 /** The queue the capsule shows: one running, or one that finished in the last minute. Ticks each second. */
@@ -272,19 +269,13 @@ function Island({ d, settings }: { d: DeskState; settings: Settings }) {
           <span className="isl-sub">No calls yet today</span>
         </div>
         <div {...layer("live")}>
-          {agents.length === 0 && <Pulse />}
-          {agents.map(a => (
-            <span key={a.tool} className={`isl-agent ${a.state}`} title={agentLabel(a)}>
-              <AgentBadge a={a} size={14} />
-              {detailed && <span>{a.state === "waiting" ? "needs you" : a.name}</span>}
-            </span>
-          ))}
+          <Pulse />
           <span className="num isl-total">{total.value}</span>
           {rows.length > 0 && <span className="isl-sep" />}
           {rows.map(r => (
             <span key={r.id} className="capsule-item">
               <span className="row" style={{ gap: 4 }}>
-                <ProviderLogo id={r.id} size={16} dim={r.paused} />
+                <RowLogo id={r.id} size={16} dim={r.paused} agent={agentOn(agents, r.id)} />
                 {detailed && <span className="num">{Math.round(r.pct)}%</span>}
               </span>
               {r.meter !== "none" && <span className={`tone-${r.tone}`} style={{ width: 16, height: 2, borderRadius: 1 }} />}
@@ -314,18 +305,11 @@ function Island({ d, settings }: { d: DeskState; settings: Settings }) {
               {agents.length > 0 ? `${agents.length} at work` : d.caps.running_calls ? `${d.running.length} running` : `${d.finished.length} calls · 30 min`}
             </span>
           </div>
-          {agents.map(a => (
-            <div key={a.tool} className="prow">
-              <AgentBadge a={a} size={16} />
-              <span className="prow-name">{a.name}</span>
-              <span className="isl-sub ellipsis">{a.project ?? ""}</span>
-              <span className={`isl-agent-state ${a.state}`}>{a.state === "waiting" ? "needs you" : "working"}</span>
-            </div>
-          ))}
+
           {rows.length === 0 && <div className="isl-sub">No provider traffic yet today.</div>}
           {rows.map(r => (
             <div key={r.id} className="prow">
-              <ProviderLogo id={r.id} size={20} dim={r.paused} />
+              <RowLogo id={r.id} size={20} dim={r.paused} agent={agentOn(agents, r.id)} />
               <span className="prow-name">{r.name}</span>
               <Strip pct={r.pct} tone={r.tone} />
               <span className="num">{r.value}</span>
@@ -488,7 +472,6 @@ function Dock({ d, settings }: { d: DeskState; settings: Settings }) {
   const detailed = isDetailed(settings);
   const rowH = detailed ? 58 : 54;
   const agents = p === "live" || p === "idle" ? agentsAtWork(d.running) : [];
-  const agentH = detailed ? 50 : 40;
   const total = totalLabel(settings, d.spend);
   const right = settings.dock_edge === "right";
 
@@ -582,18 +565,11 @@ function Dock({ d, settings }: { d: DeskState; settings: Settings }) {
           )}
         </div>
         <div className="dock-sep" />
-        {agents.map(a => (
-          <button key={a.tool} className="dock-agent" style={{ height: agentH }} title={`${agentLabel(a)} · open Desk`} onClick={() => desk.open("activity")}>
-            <AgentBadge a={a} size={22} />
-            {detailed && <span className={`dock-agent-label ${a.state}`}>{a.state === "waiting" ? "needs you" : "working"}</span>}
-          </button>
-        ))}
-        {agents.length > 0 && <div className="dock-sep" />}
         {rows.map((r, i) => (
           <div key={r.id} className={`dock-row ${hover === i ? "hover" : ""}`} style={{ height: rowH }} onMouseEnter={() => setHover(i)}>
             <span style={{ position: "relative" }}>
-              <ProviderLogo id={r.id} size={26} dim={r.paused} />
-              {r.running > 0 && <span className="run-dot" />}
+              <RowLogo id={r.id} size={26} dim={r.paused} agent={agentOn(agents, r.id)} />
+              {r.running > 0 && !agentOn(agents, r.id) && <span className="run-dot" />}
             </span>
             {r.meter !== "none" && <Strip pct={r.pct} tone={r.tone} width={30} />}
             {detailed && <span className="num">{r.value}</span>}
@@ -602,7 +578,7 @@ function Dock({ d, settings }: { d: DeskState; settings: Settings }) {
         <DeskButton page={settings.dock_button ?? "overview"} warn={settings.show_alerts ? warningLine(d.alerts, d.rows, settings) : null} />
       </div>
       {hovered && slid && (
-        <div style={{ marginTop: 10 + 46 + (agents.length ? agents.length * agentH + 9 : 0) + (hover ?? 0) * rowH - 10 }}>
+        <div style={{ marginTop: 10 + 46 + (hover ?? 0) * rowH - 10 }}>
           <ProviderCard row={hovered} warnAt={settings.warn_at} canPause={d.caps.provider_controls} onChanged={d.refresh} />
         </div>
       )}

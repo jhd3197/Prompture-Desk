@@ -209,3 +209,9 @@ export function agentsAtWork(running: LiveEvent[]): AgentWork[] {
 export function agentLabel(a: AgentWork): string {
   return `${a.name} ${a.state === "waiting" ? "needs you" : "working"}${a.project ? ` · ${a.project}` : ""}`;
 }
+
+/** The agent at work on a provider's row (Claude Code on Claude, Codex on OpenAI), waiting first. */
+export function agentOn(agents: AgentWork[], providerId: string): AgentWork | undefined {
+  const mine = agents.filter(a => (AGENT_LOGO[a.tool] ?? a.tool) === providerId);
+  return mine.find(a => a.state === "waiting") ?? mine[0];
+}
