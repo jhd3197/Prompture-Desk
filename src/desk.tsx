@@ -4,7 +4,7 @@
 import { listen } from "@tauri-apps/api/event";
 import {
   Activity, AppWindow, ArrowUpRight, Bell, Gauge, Info, Layers, LayoutDashboard, ListChecks, type LucideIcon, Palette,
-  Plug, Settings as Gear, SquareTerminal, TriangleAlert, X, ChevronLeft,
+  Plug, Route, Settings as Gear, SquareTerminal, TriangleAlert, X, ChevronLeft,
 } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useState } from "react";
@@ -24,6 +24,7 @@ import { Onboarding } from "./views/Onboarding";
 import {
   AboutSection, AlertsSection, AppearanceSection, ConnectionSection, ProvidersSection, type Save, WidgetSection,
 } from "./views/Settings";
+import { RoutingView } from "./views/Routing";
 import { ToolsCard, ToolsView } from "./views/Tools";
 import { ActivityPage } from "./views/ActivityPage";
 import { AutomationsPage } from "./views/Automations";
@@ -31,6 +32,7 @@ import { AlertsView, HeadroomView } from "./views/Views";
 
 const DASHBOARD: Array<[Page, string, LucideIcon]> = [
   ["overview", "Overview", LayoutDashboard], ["activity", "Activity", Activity], ["tools", "Coding tools", SquareTerminal],
+  ["routing", "Routing", Route],
   ["automations", "Automations", ListChecks], ["providers", "Providers", Layers], ["limits", "Limits", Gauge],
   ["alerts", "Alerts", TriangleAlert],
 ];
@@ -319,6 +321,7 @@ function DeskWindow() {
               {page === "overview" && <Overview d={d} s={s} go={setPage} />}
               {page === "activity" && <ActivityPage d={d} settings={s} />}
               {page === "tools" && <ToolsView settings={s} enabled={!!d.caps.coding_tools} />}
+              {page === "routing" && <RoutingView enabled={!!d.caps.router} spend={d.spend} />}
               {page === "automations" && <AutomationsPage d={d} />}
               {page === "limits" && <div className="d-view"><HeadroomView d={d} /></div>}
               {page === "alerts" && <div className="d-view"><AlertsView d={d} /></div>}
