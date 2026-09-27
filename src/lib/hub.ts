@@ -70,6 +70,63 @@ export interface Capabilities {
   agent_turns?: boolean;
   /** Local companion only: Claude Code and Codex can be routed through it (/v1/router). */
   router?: boolean;
+  /** Local companion only: shared project notes for coding agents (/v1/memory). */
+  memory?: boolean;
+}
+
+export type NoteKind = "decision" | "convention" | "command" | "fix" | "fact";
+
+/** A project note coding agents share. */
+export interface MemoryNote {
+  id: string;
+  kind: NoteKind;
+  content: string;
+  source: string | null;
+  verified: boolean;
+  pinned: boolean;
+  /** "claude", "codex", "you", or null. */
+  agent: string | null;
+  ts: number;
+  updated: number;
+}
+
+/** What one session was given when it started. */
+export interface MemoryInjection {
+  id: string;
+  ts: number;
+  agent: string;
+  session: string;
+  project: string;
+  via: "hook" | "router";
+  fact_ids: string[];
+  tokens: number;
+  text: string;
+}
+
+/** A workflow that recurred in a project, drafted as a SKILL.md. */
+export interface SkillIdea {
+  name: string;
+  description: string;
+  when_to_use: string;
+  steps: string[];
+  occurrences: number;
+  markdown: string;
+  saved: boolean;
+}
+
+export interface MemorySettings { enabled: boolean; budget_tokens: number; verified_only: boolean; teach: boolean }
+
+export interface MemoryOverview {
+  settings: MemorySettings;
+  projects: Array<{ project: string; facts: number; verified: number; folder: string | null }>;
+}
+
+export interface MemoryProject {
+  project: string;
+  folder: string | null;
+  facts: MemoryNote[];
+  injections: MemoryInjection[];
+  skills: SkillIdea[];
 }
 
 /** A CLI the companion can route. `routed`: its config points at the companion right now. */
@@ -483,7 +540,7 @@ function call<T>(method: string, path: string, body?: unknown): Promise<T> {
 
 /** Pages of Desk's window, dashboard first, then settings. */
 export type Page =
-  | "overview" | "activity" | "tools" | "routing" | "savings" | "automations" | "limits" | "alerts"
+  | "overview" | "activity" | "tools" | "routing" | "savings" | "memory" | "automations" | "limits" | "alerts"
   | "widget" | "appearance" | "providers" | "notifications" | "connection" | "about";
 
 export const hub = {
@@ -504,6 +561,17 @@ export const hub = {
   escalateTask: (tool: string, session: string, reason: string) =>
     call<{ escalated: boolean; task: RouterTask }>(
       "POST", `/v1/router/sessions/${encodeURIComponent(tool)}/${encodeURIComponent(session)}/escalate`, { reason }),
+  memory: () => call<MemoryOverview>("GET", "/v1/memory"),
+  memoryProject: (name: string) => call<MemoryProject>("GET", `/v1/memory/projects/${encodeURIComponent(name)}`),
+  addNote: (project: string, note: Partial<MemoryNote> & { content: string }) =>
+    call<MemoryNote>("POST", `/v1/memory/projects/${encodeURIComponent(project)}/facts`, note),
+  editNote: (project: string, id: string, changes: Partial<MemoryNote>) =>
+    call<MemoryNote>("POST", `/v1/memory/projects/${encodeURIComponent(project)}/facts/${encodeURIComponent(id)}`, changes),
+  deleteNote: (project: string, id: string) =>
+    call<{ deleted: string }>("DELETE", `/v1/memory/projects/${encodeURIComponent(project)}/facts/${encodeURIComponent(id)}`),
+  memorySettings: (changes: Partial<MemorySettings>) => call<MemorySettings>("POST", "/v1/memory/settings", changes),
+  saveSkill: (project: string, name: string) =>
+    call<{ path: string }>("POST", `/v1/memory/projects/${encodeURIComponent(project)}/skills/${encodeURIComponent(name)}/save`, {}),
   alerts: () => call<Alert[]>("GET", "/v1/alerts?limit=50"),
   tools: (period: "day" | "week" | "month" = "day") => call<Tools>("GET", `/v1/tools?period=${period}&tz_offset=${TZ()}`),
   /** Calls that finished in the last `minutes` (local companion), to fill views on connect. */
