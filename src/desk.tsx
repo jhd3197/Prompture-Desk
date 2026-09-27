@@ -282,8 +282,9 @@ function DeskWindow() {
         <div className="d-brand" data-tauri-drag-region>
           <span className="d-brand-row" data-tauri-drag-region>
             <Mark size={26} className="d-logo" />
-            <span className="d-brand-name grow" data-tauri-drag-region>Prompture Desk</span>
+            <span className="d-brand-name" data-tauri-drag-region>Prompture Desk</span>
             <StarButton />
+            <span className="grow" data-tauri-drag-region />
           </span>
         </div>
         {isSettings && !onboarding ? (
@@ -311,7 +312,7 @@ function DeskWindow() {
         <div className="s-body">
           {onboarding ? (
             <div className="d-onboarding">
-              <Onboarding onPaired={async () => { setAdding(false); await d.reloadSettings(); setPage("overview"); }} />
+              <Onboarding auto={!adding} onPaired={async () => { setAdding(false); await d.reloadSettings(); setPage("overview"); }} />
             </div>
           ) : (
             <>

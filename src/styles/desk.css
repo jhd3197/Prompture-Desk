@@ -296,7 +296,7 @@ html:has(.widget-root), html:has(.widget-root) body { overflow: hidden; } /* a t
 .d-brand-row { display: flex; align-items: center; gap: 10px; }
 .d-logo { flex: none; color: var(--w-text); pointer-events: none; }
 .s-about-mark { color: var(--w-text); }
-.d-brand-name { font-size: 18px; font-weight: 600; }
+.d-brand-name { font-size: 18px; font-weight: 600; white-space: nowrap; }
 .d-group { font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--w-faint); padding: 14px 12px 6px; }
 .d-count { font-size: 11px; font-family: var(--font-mono); background: var(--ok-soft); color: var(--s-nav-fg); border-radius: 9px; padding: 1px 7px; }
 .d-link { border: 0; background: transparent; color: var(--ok); font-size: 12.5px; padding: 0; display: inline-flex; align-items: center; gap: 4px; }
