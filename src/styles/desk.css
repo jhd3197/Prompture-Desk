@@ -30,8 +30,8 @@
   --s-side: #f6f7f9;
   --s-line: #e6e8eb;
   --s-seg: #eef0f3;
-  --s-nav-bg: color-mix(in oklch, var(--ok) 14%, white);
-  --s-nav-fg: var(--ok-strong);
+  --s-nav-bg: #e6e9ed;
+  --s-nav-fg: var(--w-text);
   --toggle-off: #c9ced4;
 }
 
@@ -57,8 +57,8 @@
   --s-side: #121417;
   --s-line: #22252a;
   --s-seg: #2a2e35;
-  --s-nav-bg: color-mix(in oklch, var(--ok) 16%, #121417);
-  --s-nav-fg: color-mix(in oklch, var(--ok) 70%, white);
+  --s-nav-bg: #24282e;
+  --s-nav-fg: var(--w-text);
   --toggle-off: #33373e;
 
   /* Re-point the dashboard tokens the panel views use at the widget palette. */
@@ -230,7 +230,7 @@ html:has(.widget-root), html:has(.widget-root) body { overflow: hidden; } /* a t
 .s-side-title { font-size: 22px; font-weight: 600; padding: 0 10px 14px; }
 .s-nav { display: flex; align-items: center; gap: 10px; text-align: left; border: 0; background: transparent; color: var(--w-sub); padding: 9px 12px; border-radius: 8px; font-size: 15px; }
 .s-nav:hover { background: var(--w-hover); }
-.s-nav.active { background: var(--s-nav-bg); color: var(--s-nav-fg); font-weight: 500; }
+.s-nav.active { background: var(--s-nav-bg); color: var(--s-nav-fg); font-weight: 600; }
 .s-nav-glyph { flex: none; opacity: .8; }
 .s-nav.active .s-nav-glyph { opacity: 1; }
 .s-main { display: flex; flex-direction: column; min-height: 0; }
