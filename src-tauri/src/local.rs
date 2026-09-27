@@ -355,6 +355,17 @@ fn now_secs() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
+/// When Desk last tried to bring its copy up to [`MIN_PROMPTURE`].
+fn minimum_marker(dir: &Path) -> PathBuf {
+    dir.join("last-minimum-upgrade")
+}
+
+/// Whether bringing Desk's copy up to the minimum may be tried again (every six hours at most).
+fn minimum_due(dir: &Path) -> bool {
+    let last = std::fs::read_to_string(minimum_marker(dir)).ok().and_then(|s| s.trim().parse::<u64>().ok()).unwrap_or(0);
+    now_secs().saturating_sub(last) >= 6 * 60 * 60
+}
+
 fn update_due(dir: &Path) -> bool {
     let last = std::fs::read_to_string(update_marker(dir)).ok().and_then(|s| s.trim().parse::<u64>().ok()).unwrap_or(0);
     now_secs().saturating_sub(last) >= UPDATE_EVERY.as_secs()
@@ -395,21 +406,31 @@ async fn start_managed(http: &reqwest::Client, owner_pid: u32) -> Result<LocalSt
     }
     report(Some("Starting Prompture…"));
     match start_first(http, vec![launcher(&bin, &[], owner_pid)]).await {
-        // Too old for Desk even with updates off: the minimum isn't optional.
-        Ok(state) if outdated(running_version(http).await.as_deref()) => {
+        // Too old for Desk even with updates off: the minimum isn't optional. Tried at most every
+        // few hours, so a minimum PyPI doesn't have yet doesn't slow every start.
+        Ok(state) if outdated(running_version(http).await.as_deref()) && minimum_due(&m.dir) => {
+            let _ = std::fs::write(minimum_marker(&m.dir), now_secs().to_string());
             report(Some("Updating Prompture…"));
             stop_gracefully(http, &state).await;
             let _ = std::fs::write(update_marker(&m.dir), now_secs().to_string());
-            let (ok, _) = upgrade_blocking(uv.clone(), m.dir.clone()).await;
-            if !ok {
-                // `uv tool upgrade` keeps the constraint of the first install; a reinstall pins the minimum.
-                if let Err(e) = install_managed(uv, m.dir.clone()).await {
-                    let _ = start_first(http, vec![launcher(&bin, &[], owner_pid)]).await;
-                    return Err(e);
+            let _ = upgrade_blocking(uv.clone(), m.dir.clone()).await;
+            report(Some("Starting Prompture…"));
+            let mut started = start_first(http, vec![launcher(&bin, &[], owner_pid)]).await;
+            // `uv tool upgrade` keeps the first install's constraint, so it can stop short of
+            // the minimum: reinstall with today's.
+            if let Ok(state) = &started {
+                if outdated(running_version(http).await.as_deref()) {
+                    report(Some("Updating Prompture…"));
+                    stop_gracefully(http, state).await;
+                    let reinstalled = install_managed(uv, m.dir.clone()).await;
+                    report(Some("Starting Prompture…"));
+                    started = start_first(http, vec![launcher(&bin, &[], owner_pid)]).await;
+                    if let (Err(e), Err(_)) = (reinstalled, &started) {
+                        return Err(e);
+                    }
                 }
             }
-            report(Some("Starting Prompture…"));
-            start_first(http, vec![launcher(&bin, &[], owner_pid)]).await.map_err(|e| {
+            started.map_err(|e| {
                 e.unwrap_or_else(|| LocalError::Failed("Prompture was updated but its companion didn't start.".into()))
             })
         }
@@ -498,9 +519,12 @@ fn is_newer(latest: &str, current: &str) -> bool {
 }
 
 /// Whether a companion reporting `version` is older than [`MIN_PROMPTURE`].
-/// Unknown versions (a source checkout reports "0") get the benefit of the doubt.
+/// A source checkout (a local version like `1.9.2.dev0+gd6daa79`, or "0") is
+/// whatever its code is, whatever its metadata says, so it never counts as old.
 fn outdated(version: Option<&str>) -> bool {
-    version.is_some_and(|v| parse_semver(v).is_some_and(|p| p != (0, 0, 0)) && is_newer(MIN_PROMPTURE, v))
+    version.is_some_and(|v| {
+        !v.contains('+') && parse_semver(v).is_some_and(|p| p != (0, 0, 0)) && is_newer(MIN_PROMPTURE, v)
+    })
 }
 
 /// The newest Prompture on PyPI, cached for [`LATEST_TTL`].
@@ -625,6 +649,8 @@ pub async fn upgrade_now(http: &reqwest::Client, owner_pid: u32) -> Result<Local
         }
         let _ = std::fs::write(update_marker(&m.dir), now_secs().to_string());
         let (ok, log) = upgrade_blocking(uv.clone(), m.dir.clone()).await;
+        // If the upgrade stops short of the minimum, the start below reinstalls right away.
+        let _ = std::fs::remove_file(minimum_marker(&m.dir));
         *LATEST.lock().unwrap() = None;
         if !ok {
             report(None);
@@ -706,6 +732,8 @@ mod tests {
         assert!(!outdated(Some(MIN_PROMPTURE)));
         assert!(!outdated(Some("1.14.0")));
         assert!(!outdated(Some("1.14.0.dev3+g1a2b3c")));
+        assert!(!outdated(Some("1.9.2.dev0+gd6daa79c8.d20260818"))); // a source checkout
+        assert!(outdated(Some("1.13.3.dev2"))); // a published pre-release is compared
         assert!(!outdated(Some("0")));
         assert!(!outdated(None));
         assert!(!outdated(Some("garbage")));
