@@ -182,6 +182,11 @@ export interface SavingsRow {
   new_spend_usd: number;
   plan_equivalent_usd: number;
   cache_hit: number | null;
+  tool_results: number;
+  tool_failures: number;
+  escalations: number;
+  /** Share of tool results that didn't fail: how presets are compared on quality. */
+  tool_success: number | null;
 }
 
 export interface Savings {
@@ -191,6 +196,8 @@ export interface Savings {
   by_tool: Array<SavingsRow & { tool: string | null }>;
   by_project: Array<SavingsRow & { project: string | null }>;
   by_rule: Array<SavingsRow & { rule: string | null }>;
+  /** Older companions omit it. */
+  by_preset?: Array<SavingsRow & { preset: string | null }>;
   by_served: Array<SavingsRow & { served: string | null }>;
 }
 

@@ -6,9 +6,10 @@ import { type RoutedCall, type Savings, type SavingsRow, count, hub, tokens, usd
 import { ProviderLogo, providerOf } from "../lib/providers";
 
 type Period = Savings["period"];
-type Group = "tool" | "project" | "rule" | "served";
+type Group = "tool" | "project" | "rule" | "preset" | "served";
 
 const TOOL_NAMES: Record<string, string> = { "claude-code": "Claude Code", codex: "Codex" };
+const PRESETS: Record<string, string> = { quality: "Quality", balanced: "Balanced", economy: "Economy" };
 const BILLING: Record<RoutedCall["billing"], string> = {
   subscription: "Plan", api: "API", local: "Local", unknown: "Unknown",
 };
@@ -50,23 +51,28 @@ function Breakdown({ data }: { data: Savings }) {
     group === "tool" ? data.by_tool.map(r => ({ ...r, name: TOOL_NAMES[r.tool ?? ""] ?? r.tool ?? "—" }))
       : group === "project" ? data.by_project.map(r => ({ ...r, name: r.project ?? "No project" }))
         : group === "rule" ? data.by_rule.map(r => ({ ...r, name: r.rule === "none" ? "No rule" : r.rule ?? "—" }))
-          : data.by_served.map(r => ({ ...r, name: short(r.served ?? "—") }))
+          : group === "preset" ? (data.by_preset ?? []).map(r => ({ ...r, name: PRESETS[r.preset ?? ""] ?? "No preset" }))
+            : data.by_served.map(r => ({ ...r, name: short(r.served ?? "—") }))
   );
   return (
     <section className="d-card">
       <header className="d-card-head">
         <h3>By</h3>
         <Segmented<Group> small label="Group by" value={group} onChange={setGroup}
-          options={[["tool", "Tool"], ["project", "Project"], ["rule", "Rule"], ["served", "Model"]]} />
+          options={[["tool", "Tool"], ["project", "Project"], ["rule", "Rule"], ["preset", "Preset"], ["served", "Model"]]} />
       </header>
       {rows.length === 0 ? <p className="d-empty">No calls yet.</p> : (
         <div className="sv-table">
           <span className="sv-th">Name</span><span className="sv-th num">Calls</span>
+          <span className="sv-th num" title="Tool results that didn't fail">Tools OK</span>
           <span className="sv-th num">Spend</span><span className="sv-th num">Saved</span>
           {rows.map(r => (
             <div key={r.name} className="sv-row">
               <span className="ellipsis" title={r.name}>{r.name}</span>
               <span className="num">{count(r.calls)}{r.routed > 0 && r.routed < r.calls ? <span className="sv-dim"> · {count(r.routed)} routed</span> : null}</span>
+              <span className="num" title={r.tool_results ? `${count(r.tool_failures)} of ${count(r.tool_results)} failed${r.escalations ? `, ${count(r.escalations)} escalated` : ""}` : undefined}>
+                {r.tool_success == null ? "—" : `${Math.round(r.tool_success * 100)}%`}
+              </span>
               <span className="num">{usd(r.cost_usd)}</span>
               <span className={`num ${r.savings_usd < 0 ? "sv-neg" : ""}`}>{signed(r.savings_usd)}</span>
             </div>
