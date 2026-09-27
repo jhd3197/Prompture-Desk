@@ -201,6 +201,12 @@ export function useDesk({ primary }: { primary: boolean }): DeskState {
               setRunning(r => (r[id] ? { ...r, [id]: { ...r[id], ...ev, type: "request.started" } } : r));
             }
             break;
+          case "request.ended": // a coding agent's turn is over; its calls arrive as request.finished
+            if (ev.request_id) {
+              const id = ev.request_id;
+              setRunning(r => { const next = { ...r }; delete next[id]; return next; });
+            }
+            break;
           case "request.finished": {
             if (ev.request_id) {
               const id = ev.request_id;
