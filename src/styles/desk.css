@@ -596,3 +596,25 @@ html:has(.widget-root), html:has(.widget-root) body { overflow: hidden; } /* a t
 .r-input { flex: 1; min-width: 0; padding: 7px 10px; font-size: 12.5px; }
 .r-arrow { color: var(--w-muted); }
 .r-add { margin-top: 10px; align-self: flex-start; }
+.r-select { flex: none; width: auto; padding: 6px 10px; font-size: 12.5px; }
+.r-num { flex: none; width: 64px; padding: 6px 8px; font-size: 12.5px; text-align: right; }
+
+/* Savings */
+.sv-stats { flex-wrap: wrap; }
+.sv-neg { color: #e5484d; }
+.sv-warn { color: var(--warn, #d97706); }
+.sv-dim { color: var(--w-faint); font-size: 11px; }
+.sv-table { display: grid; grid-template-columns: minmax(0, 1fr) auto 72px 72px; column-gap: 14px; row-gap: 6px; font-size: 12.5px; }
+.sv-row { display: contents; }
+.sv-row > span { color: var(--w-sub); }
+.sv-row > .num, .sv-th.num { text-align: right; }
+.sv-th { font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--w-faint); }
+.sv-call-wrap { border-top: 1px solid var(--w-border); }
+.sv-call-wrap:first-of-type { border-top: 0; }
+.sv-call { width: 100%; display: grid; grid-template-columns: 18px minmax(0, 1fr) auto 60px 34px; align-items: center; gap: 10px;
+  padding: 8px 0; border: 0; background: transparent; color: inherit; text-align: left; font-size: 12.5px; }
+.sv-call:hover .mono { color: var(--w-text); }
+.sv-save { font-size: 12px; text-align: right; color: var(--w-sub); }
+.sv-detail { display: flex; flex-direction: column; gap: 6px; padding: 4px 0 12px 28px; font-size: 12px; }
+.sv-kv { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 10px; color: var(--w-sub); }
+.sv-kv > span:first-child { color: var(--w-faint); }

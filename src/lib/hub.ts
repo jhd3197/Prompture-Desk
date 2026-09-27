@@ -83,19 +83,115 @@ export interface RouterTool {
   config: string;
 }
 
-/** Per tool: requested-model patterns and request kinds ("background", "main", …) → a Prompture model. */
+/** Built-in routing presets; all stay on the CLI's own login. */
+export type Preset = "quality" | "balanced" | "economy";
+
+/** Per tool: requested-model patterns and request kinds ("background", "main", …) → a model, plus a preset. */
 export interface RouteRules {
-  models: Record<string, string>;
-  kinds: Record<string, string>;
+  models?: Record<string, string>;
+  kinds?: Record<string, string>;
+  preset?: Preset;
+}
+
+/** ~/.prompture/routes.json as the companion keeps it. */
+export interface Routes {
+  tools: Record<string, RouteRules>;
+  preset?: Preset;
+  projects?: Record<string, { preset?: Preset; tools?: Record<string, RouteRules> }>;
+  fallback?: { models: string[]; allow_paid: boolean };
+  escalation?: { enabled?: boolean; after_failures?: number; after_repeats?: number; to?: string };
+  budget?: { task_usd?: number; task_attempts?: number; on_exceed?: "native" | "stop" };
 }
 
 export interface RouterState {
   url: string;
   tools: RouterTool[];
   hooks: { claude: boolean };
-  routes: { tools: Record<string, RouteRules> };
+  routes: Routes;
   kinds: string[];
   background_kinds: string[];
+  /** Preset → request kind → destination ("native:small", …). Older companions omit it. */
+  presets?: Record<Preset, Record<string, string>>;
+  /** Fallback, escalation and budget with defaults filled in. */
+  settings?: {
+    fallback: { models: string[]; allow_paid: boolean };
+    escalation: { enabled: boolean; after_failures: number; after_repeats: number; to: string };
+    budget: { task_usd: number | null; task_attempts: number; on_exceed: "native" | "stop" };
+  };
+}
+
+/** One request a coding CLI sent through the router: where it went, why, and what it cost. */
+export interface RoutedCall {
+  id: string;
+  ts: string;
+  tool: RouterTool["id"];
+  kind: string;
+  endpoint: string;
+  requested: string;
+  served: string;
+  route: "passthrough" | "native" | "routed";
+  rule: { source: string; match: string | null; target: string | null; preset: string | null; reason: string };
+  billing: "subscription" | "api" | "local" | "unknown";
+  original_billing: RoutedCall["billing"];
+  session: string | null;
+  project: string | null;
+  status: "ok" | "error";
+  error: string | null;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  latency_ms: number;
+  ttft_ms: number | null;
+  attempts: Array<{ model: string; status: string; error: string | null; cost_usd: number }>;
+  cost_usd: number;
+  cost_source: string;
+  baseline_usd: number;
+  baseline_source: string;
+  plan_equivalent_usd: number;
+  savings_usd: number;
+  switched: boolean;
+  /** Only on /v1/router/calls/<id>: the session's routing state, while the companion remembers it. */
+  task?: RouterTask | null;
+}
+
+/** A CLI session as the router sees it: its destination, failures, attempts and escalations. */
+export interface RouterTask {
+  tool: RouterTool["id"];
+  session: string;
+  project: string | null;
+  destination: RoutedCall["rule"] | null;
+  served: string | null;
+  failures: number;
+  repeats: number;
+  attempts: number;
+  spent_usd: number;
+  escalations: Array<{ at: number; reason: string; to: string | null; blocked?: string }>;
+  waiting: boolean;
+}
+
+export interface SavingsRow {
+  calls: number;
+  routed: number;
+  errors: number;
+  fallbacks: number;
+  tokens: number;
+  cost_usd: number;
+  baseline_usd: number;
+  savings_usd: number;
+  new_spend_usd: number;
+  plan_equivalent_usd: number;
+  cache_hit: number | null;
+}
+
+export interface Savings {
+  period: "day" | "week" | "month";
+  start: string;
+  total: SavingsRow;
+  by_tool: Array<SavingsRow & { tool: string | null }>;
+  by_project: Array<SavingsRow & { project: string | null }>;
+  by_rule: Array<SavingsRow & { rule: string | null }>;
+  by_served: Array<SavingsRow & { served: string | null }>;
 }
 
 export interface HubInfo {
@@ -380,7 +476,7 @@ function call<T>(method: string, path: string, body?: unknown): Promise<T> {
 
 /** Pages of Desk's window, dashboard first, then settings. */
 export type Page =
-  | "overview" | "activity" | "tools" | "routing" | "automations" | "limits" | "alerts"
+  | "overview" | "activity" | "tools" | "routing" | "savings" | "automations" | "limits" | "alerts"
   | "widget" | "appearance" | "providers" | "notifications" | "connection" | "about";
 
 export const hub = {
@@ -393,7 +489,14 @@ export const hub = {
   router: () => call<RouterState>("GET", "/v1/router"),
   setRouting: (tool: RouterTool["id"], enabled: boolean) => call<RouterState>("POST", `/v1/router/tools/${tool}`, { enabled }),
   setAgentHooks: (enabled: boolean) => call<RouterState>("POST", "/v1/router/hooks", { enabled }),
-  saveRoutes: (routes: RouterState["routes"]) => call<RouterState>("POST", "/v1/router/routes", routes),
+  saveRoutes: (routes: Routes) => call<RouterState>("POST", "/v1/router/routes", routes),
+  routerSavings: (period: Savings["period"]) => call<Savings>("GET", `/v1/router/savings?period=${period}&tz_offset=${TZ()}`),
+  routerCalls: (period: Savings["period"], routedOnly: boolean) =>
+    call<RoutedCall[]>("GET", `/v1/router/calls?period=${period}&tz_offset=${TZ()}&limit=200${routedOnly ? "&routed=true" : ""}`),
+  routerCall: (id: string) => call<RoutedCall>("GET", `/v1/router/calls/${encodeURIComponent(id)}`),
+  escalateTask: (tool: string, session: string, reason: string) =>
+    call<{ escalated: boolean; task: RouterTask }>(
+      "POST", `/v1/router/sessions/${encodeURIComponent(tool)}/${encodeURIComponent(session)}/escalate`, { reason }),
   alerts: () => call<Alert[]>("GET", "/v1/alerts?limit=50"),
   tools: (period: "day" | "week" | "month" = "day") => call<Tools>("GET", `/v1/tools?period=${period}&tz_offset=${TZ()}`),
   /** Calls that finished in the last `minutes` (local companion), to fill views on connect. */

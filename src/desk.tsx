@@ -3,7 +3,7 @@
 
 import { listen } from "@tauri-apps/api/event";
 import {
-  Activity, AppWindow, ArrowUpRight, Bell, Gauge, Info, Layers, LayoutDashboard, ListChecks, type LucideIcon, Palette,
+  Activity, AppWindow, ArrowUpRight, Bell, Coins, Gauge, Info, Layers, LayoutDashboard, ListChecks, type LucideIcon, Palette,
   Plug, Route, Settings as Gear, SquareTerminal, TriangleAlert, X, ChevronLeft,
 } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -25,6 +25,7 @@ import {
   AboutSection, AlertsSection, AppearanceSection, ConnectionSection, ProvidersSection, type Save, WidgetSection,
 } from "./views/Settings";
 import { RoutingView } from "./views/Routing";
+import { SavingsView } from "./views/Savings";
 import { ToolsCard, ToolsView } from "./views/Tools";
 import { ActivityPage } from "./views/ActivityPage";
 import { AutomationsPage } from "./views/Automations";
@@ -32,7 +33,7 @@ import { AlertsView, HeadroomView } from "./views/Views";
 
 const DASHBOARD: Array<[Page, string, LucideIcon]> = [
   ["overview", "Overview", LayoutDashboard], ["activity", "Activity", Activity], ["tools", "Coding tools", SquareTerminal],
-  ["routing", "Routing", Route],
+  ["routing", "Routing", Route], ["savings", "Savings", Coins],
   ["automations", "Automations", ListChecks], ["providers", "Providers", Layers], ["limits", "Limits", Gauge],
   ["alerts", "Alerts", TriangleAlert],
 ];
@@ -322,6 +323,7 @@ function DeskWindow() {
               {page === "activity" && <ActivityPage d={d} settings={s} />}
               {page === "tools" && <ToolsView settings={s} enabled={!!d.caps.coding_tools} />}
               {page === "routing" && <RoutingView enabled={!!d.caps.router} spend={d.spend} statusKey={d.status.state} />}
+              {page === "savings" && <SavingsView enabled={!!d.caps.router} />}
               {page === "automations" && <AutomationsPage d={d} />}
               {page === "limits" && <div className="d-view"><HeadroomView d={d} /></div>}
               {page === "alerts" && <div className="d-view"><AlertsView d={d} /></div>}
