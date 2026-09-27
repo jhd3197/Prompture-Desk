@@ -31,7 +31,9 @@ const TIER_WORDS: Record<string, string> = { small: "small model", mid: "mid mod
 
 /** "titles → small model · summaries → mid model", from a preset's kind map. */
 function presetLine(kinds: Record<string, string> | undefined): string {
-  const parts = Object.entries(kinds ?? {}).map(([kind, to]) => {
+  const order = Object.keys(KIND_WORDS);
+  const entries = Object.entries(kinds ?? {}).sort(([a], [b]) => order.indexOf(a) - order.indexOf(b));
+  const parts = entries.map(([kind, to]) => {
     const tier = to.startsWith("native:") ? to.slice(7) : to;
     return `${KIND_WORDS[kind] ?? kind} → ${TIER_WORDS[tier] ?? tier}`;
   });
@@ -270,7 +272,9 @@ function LocalCard({ routes, models, onSave }: { routes: Routes; models: string[
         <input className="s-addr mono r-input" list="r-local-models" placeholder="ollama/qwen3:8b" value={model}
           onChange={e => setModel(e.target.value)} onBlur={() => { if (model.trim() !== (routes.local?.model ?? "")) void save({}); }} />
       </label>
+      {!routes.local?.model && <span className="d-prov-sub r-hint">Ollama or LM Studio, for titles and as a fallback.</span>}
       <datalist id="r-local-models">{models.filter(m => /^(ollama|lmstudio|llamacpp)\//.test(m)).map(m => <option key={m} value={m} />)}</datalist>
+      {routes.local?.model && <>
       <div className="r-line">
         <span className="r-label grow">Use it for titles</span>
         <Toggle on={titles} label="Local model for titles"
@@ -280,6 +284,7 @@ function LocalCard({ routes, models, onSave }: { routes: Routes; models: string[
         <span className="r-label grow">Try it first when a call fails</span>
         <Toggle on={!!local.fallback} label="Local model as first fallback" onChange={v => save({ fallback: v })} />
       </div>
+      </>}
       <div className="r-line">
         <span className="r-label grow">Reuse titles for near-identical prompts</span>
         <Toggle on={!!routes.cache?.enabled} label="Reuse title answers"
