@@ -321,7 +321,7 @@ function DeskWindow() {
               {page === "overview" && <Overview d={d} s={s} go={setPage} />}
               {page === "activity" && <ActivityPage d={d} settings={s} />}
               {page === "tools" && <ToolsView settings={s} enabled={!!d.caps.coding_tools} />}
-              {page === "routing" && <RoutingView enabled={!!d.caps.router} spend={d.spend} />}
+              {page === "routing" && <RoutingView enabled={!!d.caps.router} spend={d.spend} statusKey={d.status.state} />}
               {page === "automations" && <AutomationsPage d={d} />}
               {page === "limits" && <div className="d-view"><HeadroomView d={d} /></div>}
               {page === "alerts" && <div className="d-view"><AlertsView d={d} /></div>}

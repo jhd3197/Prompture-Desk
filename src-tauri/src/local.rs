@@ -29,8 +29,12 @@ const START_TIMEOUT: Duration = Duration::from_secs(15);
 const SETUP_TIMEOUT: Duration = Duration::from_secs(600);
 const UPDATE_TIMEOUT: Duration = Duration::from_secs(60);
 const UPDATE_EVERY: Duration = Duration::from_secs(24 * 60 * 60);
+/// The oldest Prompture whose companion has everything Desk uses (routing Claude
+/// Code and Codex, a clean shutdown). An older one Desk started is replaced by
+/// Desk's own copy, and Desk's own copy is upgraded to at least this.
+pub const MIN_PROMPTURE: &str = "1.13.3";
 /// What Desk's own copy installs; `PROMPTURE_DESK_PACKAGE` overrides it (a path or pin, for development).
-const PACKAGE: &str = "prompture>=1.13";
+const PACKAGE: &str = "prompture>=1.13.3";
 const PYTHON: &str = "3.12";
 const PYPI_JSON: &str = "https://pypi.org/pypi/prompture/json";
 /// How long a PyPI answer is reused before asking again.
@@ -365,6 +369,15 @@ async fn update_managed(uv: PathBuf, dir: PathBuf) {
     .await;
 }
 
+/// `uv tool upgrade prompture`, waited for; returns success and stderr.
+async fn upgrade_blocking(uv: PathBuf, dir: PathBuf) -> (bool, String) {
+    tauri::async_runtime::spawn_blocking(move || {
+        run(uv_command(&uv, &dir, &["tool", "upgrade", "prompture"]), SETUP_TIMEOUT)
+    })
+    .await
+    .unwrap_or((false, String::new()))
+}
+
 /// Start the companion from Desk's own Prompture, setting it up or updating it first.
 async fn start_managed(http: &reqwest::Client, owner_pid: u32) -> Result<LocalState, LocalError> {
     let (Some(m), Some(uv)) = (MANAGED.get(), uv_path()) else {
@@ -381,6 +394,24 @@ async fn start_managed(http: &reqwest::Client, owner_pid: u32) -> Result<LocalSt
     }
     report(Some("Starting Prompture…"));
     match start_first(http, vec![launcher(&bin, &[], owner_pid)]).await {
+        // Too old for Desk even with updates off: the minimum isn't optional.
+        Ok(state) if outdated(running_version(http).await.as_deref()) => {
+            report(Some("Updating Prompture…"));
+            stop_gracefully(http, &state).await;
+            let _ = std::fs::write(update_marker(&m.dir), now_secs().to_string());
+            let (ok, _) = upgrade_blocking(uv.clone(), m.dir.clone()).await;
+            if !ok {
+                // `uv tool upgrade` keeps the constraint of the first install; a reinstall pins the minimum.
+                if let Err(e) = install_managed(uv, m.dir.clone()).await {
+                    let _ = start_first(http, vec![launcher(&bin, &[], owner_pid)]).await;
+                    return Err(e);
+                }
+            }
+            report(Some("Starting Prompture…"));
+            start_first(http, vec![launcher(&bin, &[], owner_pid)]).await.map_err(|e| {
+                e.unwrap_or_else(|| LocalError::Failed("Prompture was updated but its companion didn't start.".into()))
+            })
+        }
         Ok(state) => Ok(state),
         // Our copy predates the companion (or is broken): reinstall once and retry.
         Err(_) => {
@@ -403,9 +434,16 @@ pub async fn ensure(http: &reqwest::Client, owner_pid: u32) -> Result<LocalState
         }
     }
     let own = match start_first(http, launchers(owner_pid)).await {
-        Ok(state) => {
+        Ok(state) if !outdated(running_version(http).await.as_deref()) => {
             RUNNING_OWN.store(false, Ordering::Relaxed);
             return Ok(state);
+        }
+        // Started, but too old for what Desk shows: Desk's own, current copy takes over.
+        Ok(state) => {
+            stop_gracefully(http, &state).await;
+            Some(LocalError::NeedsUpgrade(format!(
+                "Prompture on this PC is older than {MIN_PROMPTURE}. Update it: pipx upgrade prompture (or pip install -U prompture)."
+            )))
         }
         Err(problem) => problem,
     };
@@ -435,6 +473,10 @@ pub struct PromptureStatus {
     /// The newest release on PyPI; `None` when updates are off or PyPI is unreachable.
     pub latest: Option<String>,
     pub update_available: bool,
+    /// The oldest Prompture Desk works fully with ([`MIN_PROMPTURE`]).
+    pub required: &'static str,
+    /// The running companion is older than `required` (one the user installed and started).
+    pub update_required: bool,
 }
 
 /// `MAJOR.MINOR.PATCH` as a comparable tuple, ignoring pre-release and build parts.
@@ -452,6 +494,12 @@ fn is_newer(latest: &str, current: &str) -> bool {
         (Some(l), Some(c)) => l > c,
         _ => false,
     }
+}
+
+/// Whether a companion reporting `version` is older than [`MIN_PROMPTURE`].
+/// Unknown versions (a source checkout reports "0") get the benefit of the doubt.
+fn outdated(version: Option<&str>) -> bool {
+    version.is_some_and(|v| parse_semver(v).is_some_and(|p| p != (0, 0, 0)) && is_newer(MIN_PROMPTURE, v))
 }
 
 /// The newest Prompture on PyPI, cached for [`LATEST_TTL`].
@@ -498,6 +546,8 @@ pub async fn status(http: &reqwest::Client, fresh: bool) -> PromptureStatus {
             _ => "auto",
         },
         source: version.as_ref().map(|_| if RUNNING_OWN.load(Ordering::Relaxed) { "desk" } else { "system" }),
+        update_required: outdated(version.as_deref()),
+        required: MIN_PROMPTURE,
         version,
         latest,
         update_available,
@@ -523,6 +573,35 @@ fn stop(pid: u32) {
     let _ = cmd.status();
 }
 
+/// Stop a companion so it can clean up after itself: routed CLIs are pointed
+/// back at their vendors before it exits. Ends the process instead when it
+/// doesn't answer (companions before 1.13.3 have no `/v1/shutdown`).
+async fn stop_gracefully(http: &reqwest::Client, state: &LocalState) {
+    let asked = http
+        .post(format!("{}/v1/shutdown", state.url))
+        .bearer_auth(&state.token)
+        .json(&serde_json::json!({}))
+        .timeout(Duration::from_secs(2))
+        .send()
+        .await
+        .is_ok_and(|r| r.status().is_success());
+    if asked {
+        let started = Instant::now();
+        while started.elapsed() < Duration::from_secs(8) {
+            if !reachable(http, state).await {
+                // A moment for the process to exit and let go of its files.
+                tokio::time::sleep(Duration::from_millis(700)).await;
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+    }
+    if let Some(pid) = state.pid {
+        let _ = tauri::async_runtime::spawn_blocking(move || stop(pid)).await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+}
+
 /// Upgrade Desk's own Prompture now: stop its companion (Windows can't replace
 /// a running executable), upgrade, and start it again.
 pub async fn upgrade_now(http: &reqwest::Client, owner_pid: u32) -> Result<LocalState, LocalError> {
@@ -540,18 +619,11 @@ pub async fn upgrade_now(http: &reqwest::Client, owner_pid: u32) -> Result<Local
     {
         let _one_at_a_time = ENSURE.lock().await;
         report(Some("Updating Prompture…"));
-        if let Some(pid) = read_state().and_then(|s| s.pid) {
-            let _ = tauri::async_runtime::spawn_blocking(move || stop(pid)).await;
-            // Give the process a moment to let go of its files.
-            tokio::time::sleep(Duration::from_millis(500)).await;
+        if let Some(state) = read_state() {
+            stop_gracefully(http, &state).await;
         }
         let _ = std::fs::write(update_marker(&m.dir), now_secs().to_string());
-        let (uv, dir) = (uv.clone(), m.dir.clone());
-        let (ok, log) = tauri::async_runtime::spawn_blocking(move || {
-            run(uv_command(&uv, &dir, &["tool", "upgrade", "prompture"]), SETUP_TIMEOUT)
-        })
-        .await
-        .unwrap_or((false, String::new()));
+        let (ok, log) = upgrade_blocking(uv.clone(), m.dir.clone()).await;
         *LATEST.lock().unwrap() = None;
         if !ok {
             report(None);
@@ -624,6 +696,18 @@ mod tests {
         assert!(!is_newer("1.13.2", "1.14.0.dev3+g1a2b3c"));
         assert!(!is_newer("garbage", "1.0.0"));
         assert_eq!(parse_semver("v2.0"), Some((2, 0, 0)));
+    }
+
+    #[test]
+    fn companions_older_than_the_minimum_are_outdated() {
+        assert!(outdated(Some("1.13.2")));
+        assert!(outdated(Some("1.12.9")));
+        assert!(!outdated(Some(MIN_PROMPTURE)));
+        assert!(!outdated(Some("1.14.0")));
+        assert!(!outdated(Some("1.14.0.dev3+g1a2b3c")));
+        assert!(!outdated(Some("0")));
+        assert!(!outdated(None));
+        assert!(!outdated(Some("garbage")));
     }
 
     #[test]

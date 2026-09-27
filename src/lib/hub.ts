@@ -48,6 +48,10 @@ export interface PromptureStatus {
   version: string | null;
   latest: string | null;
   update_available: boolean;
+  /** The oldest Prompture Desk works fully with. */
+  required: string;
+  /** The running Prompture is older than `required` (one the user installed and started). */
+  update_required: boolean;
 }
 
 export interface Capabilities {

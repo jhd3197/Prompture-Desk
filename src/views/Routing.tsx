@@ -7,6 +7,7 @@ import { Toggle } from "../components/ui";
 import { type RouteRules, type RouterState, type RouterTool, type Spend, hub } from "../lib/hub";
 import { AGENT_LOGO } from "../lib/model";
 import { ProviderLogo } from "../lib/providers";
+import { usePrompture } from "../lib/updater";
 
 const TOOL_AGENT: Record<RouterTool["id"], string> = { "claude-code": "claude", codex: "codex" };
 const VENDOR: Record<RouterTool["id"], string> = { "claude-code": "Anthropic", codex: "OpenAI" };
@@ -109,7 +110,26 @@ function RulesCard({
   );
 }
 
-export function RoutingView({ enabled, spend }: { enabled: boolean; spend: Spend | null }) {
+/** Shown while the companion has no router: an older Prompture, or none yet. */
+function NeedsPrompture({ statusKey }: { statusKey: unknown }) {
+  const p = usePrompture(true, statusKey);
+  const st = p.status;
+  const need = `Routing needs Prompture ${st?.required ?? ""}+.`.replace(" +.", ".");
+  return (
+    <div className="d-empty stack" style={{ gap: 8, alignItems: "flex-start" }}>
+      <span>{st?.version ? `${need} This PC runs ${st.version}.` : need}</span>
+      {st?.source === "system" && <span className="mono">pipx upgrade prompture</span>}
+      {st?.source === "desk" && (
+        <button className="s-btn sm primary" disabled={!!p.busy} onClick={p.update}>
+          {p.busy === "updating" ? "Updating…" : "Update now"}
+        </button>
+      )}
+      {p.error && <span className="s-error" style={{ whiteSpace: "pre-wrap" }}>{p.error}</span>}
+    </div>
+  );
+}
+
+export function RoutingView({ enabled, spend, statusKey }: { enabled: boolean; spend: Spend | null; statusKey?: unknown }) {
   const [state, setState] = useState<RouterState | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -124,7 +144,7 @@ export function RoutingView({ enabled, spend }: { enabled: boolean; spend: Spend
   // Models seen today, as suggestions for where to send calls.
   const models = useMemo(() => [...new Set(["passthrough", ...(spend?.by_model.map(m => m.model) ?? [])])], [spend]);
 
-  if (!enabled) return <p className="d-empty">Routing needs Prompture on this PC, updated.</p>;
+  if (!enabled) return <NeedsPrompture statusKey={statusKey} />;
   if (!state) return <p className="d-empty">{error ?? "Loading…"}</p>;
 
   const run = async (fn: () => Promise<RouterState>) => {
