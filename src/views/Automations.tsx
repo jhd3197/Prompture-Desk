@@ -49,7 +49,7 @@ function saveDraft(draft: Draft) {
 function draftFrom(run: Automation): Draft {
   const cost = run.stop.cost_usd;
   return {
-    cwd: run.cwd, agent: run.agent, model: run.model ?? "default",
+    cwd: run.cwd, agent: run.auto ? "auto" : run.agent, model: run.model ?? "default",
     steps: run.steps.map(s => ({ key: newKey(), text: s.text, session: s.session })),
     stop: { fail: run.stop.fail, ask: run.stop.ask, limit: run.stop.limit, cost: cost != null, costUsd: cost ?? 10 },
   };
@@ -350,6 +350,7 @@ function Builder({ d, from, onCancel, onStarted }: {
           <span className="au-label">Agent</span>
           <div className="row" style={{ gap: 16 }}>
             <select className="au-select" value={draft.agent} onChange={e => update({ agent: e.target.value, model: "default" })}>
+              <option value="auto">Auto (most plan left)</option>
               {agents.map(x => <option key={x.id} value={x.id} disabled={!x.installed}>{x.name}{x.installed ? "" : " (not installed)"}</option>)}
             </select>
             <span className="au-label">Model</span>
@@ -506,7 +507,7 @@ function RunView({ d, id, onBack, onNew }: { d: DeskState; id: string; onBack: (
           <span className="num au-stats">{doneCount} of {run.steps.length} · {duration(total)}{run.cost_usd ? ` · ${money(run.cost_usd)}` : ""}</span>
         </div>
         {run.pausing && <span className="au-note warn">Pauses after this step</span>}
-        {ended && run.note && <span className="au-note">{run.note}</span>}
+        {(ended || run.auto) && run.note && <span className="au-note">{run.note}</span>}
         {error && <span className="s-error au-note">{error}</span>}
       </div>
       <div className="au-scroll au-tl">

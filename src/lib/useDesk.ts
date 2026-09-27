@@ -160,7 +160,8 @@ export function useDesk({ primary }: { primary: boolean }): DeskState {
   const active = settings?.hubs.find(h => h.id === settings.active_hub) ?? null;
   const mode = active ? active.kind : null;
 
-  // What the active connection can do (the local companion has no controls).
+  // What the active connection can do (the local companion has no controls). Re-read
+  // on every reconnect: an updated or restarted companion may do more than before.
   useEffect(() => {
     if (!paired || !active) return;
     let cancelled = false;
@@ -169,7 +170,7 @@ export function useDesk({ primary }: { primary: boolean }): DeskState {
       .catch(() => { if (!cancelled) window.setTimeout(load, 3000); });
     load();
     return () => { cancelled = true; };
-  }, [paired, active?.id, active?.url]);
+  }, [paired, active?.id, active?.url, live]);
 
   // Poll the slower-moving views while paired, at the chosen rate.
   const refreshSecs = settings?.refresh_secs ?? 5;

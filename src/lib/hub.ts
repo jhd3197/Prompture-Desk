@@ -48,6 +48,10 @@ export interface PromptureStatus {
   version: string | null;
   latest: string | null;
   update_available: boolean;
+  /** The oldest Prompture Desk works fully with. */
+  required: string;
+  /** The running Prompture is older than `required` (one the user installed and started). */
+  update_required: boolean;
 }
 
 export interface Capabilities {
@@ -66,11 +70,72 @@ export interface Capabilities {
   agent_turns?: boolean;
   /** Local companion only: Claude Code and Codex can be routed through it (/v1/router). */
   router?: boolean;
+  /** Local companion only: routed calls are recorded, with presets, fallback and task controls. */
+  router_calls?: boolean;
+  /** Local companion only: Gemini CLI can be routed too. */
+  gemini_routing?: boolean;
+  /** Local companion only: shared project notes for coding agents (/v1/memory). */
+  memory?: boolean;
+}
+
+export type NoteKind = "decision" | "convention" | "command" | "fix" | "fact";
+
+/** A project note coding agents share. */
+export interface MemoryNote {
+  id: string;
+  kind: NoteKind;
+  content: string;
+  source: string | null;
+  verified: boolean;
+  pinned: boolean;
+  /** "claude", "codex", "you", or null. */
+  agent: string | null;
+  ts: number;
+  updated: number;
+}
+
+/** What one session was given when it started. */
+export interface MemoryInjection {
+  id: string;
+  ts: number;
+  agent: string;
+  session: string;
+  project: string;
+  via: "hook" | "router";
+  fact_ids: string[];
+  tokens: number;
+  text: string;
+}
+
+/** A workflow that recurred in a project, drafted as a SKILL.md. */
+export interface SkillIdea {
+  name: string;
+  description: string;
+  when_to_use: string;
+  steps: string[];
+  occurrences: number;
+  markdown: string;
+  saved: boolean;
+}
+
+export interface MemorySettings { enabled: boolean; budget_tokens: number; verified_only: boolean; teach: boolean }
+
+export interface MemoryOverview {
+  settings: MemorySettings;
+  projects: Array<{ project: string; facts: number; verified: number; folder: string | null }>;
+}
+
+export interface MemoryProject {
+  project: string;
+  folder: string | null;
+  facts: MemoryNote[];
+  injections: MemoryInjection[];
+  skills: SkillIdea[];
 }
 
 /** A CLI the companion can route. `routed`: its config points at the companion right now. */
 export interface RouterTool {
-  id: "claude-code" | "codex";
+  id: "claude-code" | "codex" | "gemini-cli";
   name: string;
   installed: boolean;
   enabled: boolean;
@@ -79,19 +144,129 @@ export interface RouterTool {
   config: string;
 }
 
-/** Per tool: requested-model patterns and request kinds ("background", "main", …) → a Prompture model. */
+/** Built-in routing presets; all stay on the CLI's own login. */
+export type Preset = "quality" | "balanced" | "economy";
+
+/** Per tool: requested-model patterns and request kinds ("background", "main", …) → a model, plus a preset. */
 export interface RouteRules {
-  models: Record<string, string>;
-  kinds: Record<string, string>;
+  models?: Record<string, string>;
+  kinds?: Record<string, string>;
+  preset?: Preset;
+}
+
+/** ~/.prompture/routes.json as the companion keeps it. */
+export interface Routes {
+  tools: Record<string, RouteRules>;
+  preset?: Preset;
+  projects?: Record<string, { preset?: Preset; tools?: Record<string, RouteRules> }>;
+  fallback?: { models: string[]; allow_paid: boolean };
+  escalation?: { enabled?: boolean; after_failures?: number; after_repeats?: number; to?: string };
+  budget?: { task_usd?: number; task_attempts?: number; on_exceed?: "native" | "stop" };
+  /** A model on this PC for some request kinds, and first in line when a call fails. */
+  local?: { model?: string; kinds?: string[]; fallback?: boolean };
+  /** Reuse answers to near-identical background requests (titles). */
+  cache?: { enabled?: boolean; kinds?: string[]; similarity?: number };
 }
 
 export interface RouterState {
   url: string;
   tools: RouterTool[];
   hooks: { claude: boolean };
-  routes: { tools: Record<string, RouteRules> };
+  routes: Routes;
   kinds: string[];
   background_kinds: string[];
+  /** Preset → request kind → destination ("native:small", …). Older companions omit it. */
+  presets?: Record<Preset, Record<string, string>>;
+  /** Fallback, escalation and budget with defaults filled in. */
+  settings?: {
+    fallback: { models: string[]; allow_paid: boolean };
+    escalation: { enabled: boolean; after_failures: number; after_repeats: number; to: string };
+    budget: { task_usd: number | null; task_attempts: number; on_exceed: "native" | "stop" };
+    local?: { model: string | null; kinds: string[]; fallback: boolean };
+  };
+}
+
+/** One request a coding CLI sent through the router: where it went, why, and what it cost. */
+export interface RoutedCall {
+  id: string;
+  ts: string;
+  tool: RouterTool["id"];
+  kind: string;
+  endpoint: string;
+  requested: string;
+  served: string;
+  route: "passthrough" | "native" | "routed" | "cached";
+  rule: { source: string; match: string | null; target: string | null; preset: string | null; reason: string };
+  billing: "subscription" | "api" | "local" | "unknown";
+  original_billing: RoutedCall["billing"];
+  session: string | null;
+  project: string | null;
+  status: "ok" | "error";
+  error: string | null;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  latency_ms: number;
+  ttft_ms: number | null;
+  attempts: Array<{ model: string; status: string; error: string | null; cost_usd: number }>;
+  cost_usd: number;
+  cost_source: string;
+  baseline_usd: number;
+  baseline_source: string;
+  plan_equivalent_usd: number;
+  savings_usd: number;
+  switched: boolean;
+  /** Only on /v1/router/calls/<id>: the session's routing state, while the companion remembers it. */
+  task?: RouterTask | null;
+}
+
+/** A CLI session as the router sees it: its destination, failures, attempts and escalations. */
+export interface RouterTask {
+  tool: RouterTool["id"];
+  session: string;
+  project: string | null;
+  destination: RoutedCall["rule"] | null;
+  served: string | null;
+  failures: number;
+  repeats: number;
+  attempts: number;
+  spent_usd: number;
+  escalations: Array<{ at: number; reason: string; to: string | null; blocked?: string }>;
+  pending_switch?: { to: string; now: boolean; at: number } | null;
+  switches?: Array<{ at: number; to: string; now: boolean }>;
+  waiting: boolean;
+}
+
+export interface SavingsRow {
+  calls: number;
+  routed: number;
+  errors: number;
+  fallbacks: number;
+  tokens: number;
+  cost_usd: number;
+  baseline_usd: number;
+  savings_usd: number;
+  new_spend_usd: number;
+  plan_equivalent_usd: number;
+  cache_hit: number | null;
+  tool_results: number;
+  tool_failures: number;
+  escalations: number;
+  /** Share of tool results that didn't fail: how presets are compared on quality. */
+  tool_success: number | null;
+}
+
+export interface Savings {
+  period: "day" | "week" | "month";
+  start: string;
+  total: SavingsRow;
+  by_tool: Array<SavingsRow & { tool: string | null }>;
+  by_project: Array<SavingsRow & { project: string | null }>;
+  by_rule: Array<SavingsRow & { rule: string | null }>;
+  /** Older companions omit it. */
+  by_preset?: Array<SavingsRow & { preset: string | null }>;
+  by_served: Array<SavingsRow & { served: string | null }>;
 }
 
 export interface HubInfo {
@@ -191,6 +366,8 @@ export interface Automation {
   created_at: number;
   ended_at: number | null;
   note: string | null;
+  /** The agent is picked by plan left and may change between fresh sessions. */
+  auto?: boolean;
   stop: { fail: boolean; ask: boolean; limit: boolean; cost_usd: number | null };
   cost_usd: number;
   duration_s: number;
@@ -376,7 +553,7 @@ function call<T>(method: string, path: string, body?: unknown): Promise<T> {
 
 /** Pages of Desk's window, dashboard first, then settings. */
 export type Page =
-  | "overview" | "activity" | "tools" | "routing" | "automations" | "limits" | "alerts"
+  | "overview" | "activity" | "tools" | "routing" | "savings" | "memory" | "automations" | "limits" | "alerts"
   | "widget" | "appearance" | "providers" | "notifications" | "connection" | "about";
 
 export const hub = {
@@ -389,7 +566,28 @@ export const hub = {
   router: () => call<RouterState>("GET", "/v1/router"),
   setRouting: (tool: RouterTool["id"], enabled: boolean) => call<RouterState>("POST", `/v1/router/tools/${tool}`, { enabled }),
   setAgentHooks: (enabled: boolean) => call<RouterState>("POST", "/v1/router/hooks", { enabled }),
-  saveRoutes: (routes: RouterState["routes"]) => call<RouterState>("POST", "/v1/router/routes", routes),
+  saveRoutes: (routes: Routes) => call<RouterState>("POST", "/v1/router/routes", routes),
+  routerSavings: (period: Savings["period"]) => call<Savings>("GET", `/v1/router/savings?period=${period}&tz_offset=${TZ()}`),
+  routerCalls: (period: Savings["period"], routedOnly: boolean) =>
+    call<RoutedCall[]>("GET", `/v1/router/calls?period=${period}&tz_offset=${TZ()}&limit=200${routedOnly ? "&routed=true" : ""}`),
+  routerCall: (id: string) => call<RoutedCall>("GET", `/v1/router/calls/${encodeURIComponent(id)}`),
+  switchTask: (tool: string, session: string, to: string, now: boolean) =>
+    call<{ task: RouterTask }>(
+      "POST", `/v1/router/sessions/${encodeURIComponent(tool)}/${encodeURIComponent(session)}/switch`, { to, now }),
+  escalateTask: (tool: string, session: string, reason: string) =>
+    call<{ escalated: boolean; task: RouterTask }>(
+      "POST", `/v1/router/sessions/${encodeURIComponent(tool)}/${encodeURIComponent(session)}/escalate`, { reason }),
+  memory: () => call<MemoryOverview>("GET", "/v1/memory"),
+  memoryProject: (name: string) => call<MemoryProject>("GET", `/v1/memory/projects/${encodeURIComponent(name)}`),
+  addNote: (project: string, note: Partial<MemoryNote> & { content: string }) =>
+    call<MemoryNote>("POST", `/v1/memory/projects/${encodeURIComponent(project)}/facts`, note),
+  editNote: (project: string, id: string, changes: Partial<MemoryNote>) =>
+    call<MemoryNote>("POST", `/v1/memory/projects/${encodeURIComponent(project)}/facts/${encodeURIComponent(id)}`, changes),
+  deleteNote: (project: string, id: string) =>
+    call<{ deleted: string }>("DELETE", `/v1/memory/projects/${encodeURIComponent(project)}/facts/${encodeURIComponent(id)}`),
+  memorySettings: (changes: Partial<MemorySettings>) => call<MemorySettings>("POST", "/v1/memory/settings", changes),
+  saveSkill: (project: string, name: string) =>
+    call<{ path: string }>("POST", `/v1/memory/projects/${encodeURIComponent(project)}/skills/${encodeURIComponent(name)}/save`, {}),
   alerts: () => call<Alert[]>("GET", "/v1/alerts?limit=50"),
   tools: (period: "day" | "week" | "month" = "day") => call<Tools>("GET", `/v1/tools?period=${period}&tz_offset=${TZ()}`),
   /** Calls that finished in the last `minutes` (local companion), to fill views on connect. */
