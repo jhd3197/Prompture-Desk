@@ -180,6 +180,15 @@ function useIslandWindow(target: Box): Box {
     return () => { cancelled = true; window.clearTimeout(timer); };
   }, [place, target.w, target.h, target.r, target.top]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // A DPI change can strand the island off-screen; re-place it around the same target.
+  useEffect(() => {
+    const unlisten = getCurrentWindow().onScaleChanged(() => {
+      const { w, h } = current.current;
+      if (w > 0 && h > 0) place(w, h);
+    });
+    return () => { unlisten.then(fn => fn()); };
+  }, [place]);
+
   return shown;
 }
 
@@ -406,6 +415,12 @@ function useDockPlacement(
 
   useEffect(() => { place(); }, [place, settings.widget_style, settings.dock_edge, settings.dock_y, settings.detail]);
 
+  // Moving between monitors (or a DPI change) can strand the window off-screen.
+  useEffect(() => {
+    const unlisten = getCurrentWindow().onScaleChanged(() => { place(); });
+    return () => { unlisten.then(fn => fn()); };
+  }, [place]);
+
   return { placedAt, place };
 }
 
@@ -466,7 +481,7 @@ function Dock({ d, settings }: { d: DeskState; settings: Settings }) {
   const p = phase(d);
   // Until the first numbers arrive, the dock is just the spinner: no rows showing 0.
   const rows = p === "live" || p === "idle" ? activeRows(d.rows, settings) : [];
-  const [hover, setHover] = useState<number | null>(null);
+  const [hover, setHover] = useState<string | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const railRef = useRef<HTMLDivElement>(null);
   const detailed = isDetailed(settings);
@@ -536,7 +551,37 @@ function Dock({ d, settings }: { d: DeskState; settings: Settings }) {
   const onEnter = () => window.clearTimeout(leaveTimer.current);
   useEffect(() => () => window.clearTimeout(leaveTimer.current), []);
 
-  const hovered = hover != null ? rows[hover] : undefined;
+  // Key the open card by provider id, not row index: a refresh after
+  // pause/resume can reorder rows, and an index would point at another provider.
+  const hoveredIdx = hover != null ? rows.findIndex(r => r.id === hover) : -1;
+  const hovered = hoveredIdx >= 0 ? rows[hoveredIdx] : undefined;
+
+  // The card hangs beside the hovered row. Clamp it inside the dock's own
+  // height, so showing it never grows the window downwards or repositions it
+  // under the pointer — hovering between rows just slides the card along.
+  const cardRef = useRef<HTMLDivElement>(null);
+  const [cardH, setCardH] = useState(0);
+  useLayoutEffect(() => {
+    const el = cardRef.current;
+    if (!el) return;
+    const measure = () => setCardH(el.offsetHeight);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [hoveredIdx]);
+  const [railH, setRailH] = useState(0);
+  useLayoutEffect(() => {
+    const el = railRef.current;
+    if (!el) return;
+    const measure = () => setRailH(el.offsetHeight);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  const cardTop = Math.max(0, Math.min(46 + Math.max(0, hoveredIdx) * rowH, Math.max(0, railH - cardH)));
+
   const away = `translateX(${right ? "" : "-"}${140 + PAD}px)`;
   return (
     <div ref={wrapRef} className={`dock-wrap ${settings.dock_edge}`} onMouseLeave={onLeave} onMouseEnter={onEnter}>
@@ -565,8 +610,8 @@ function Dock({ d, settings }: { d: DeskState; settings: Settings }) {
           )}
         </div>
         <div className="dock-sep" />
-        {rows.map((r, i) => (
-          <div key={r.id} className={`dock-row ${hover === i ? "hover" : ""}`} style={{ height: rowH }} onMouseEnter={() => setHover(i)}>
+        {rows.map(r => (
+          <div key={r.id} className={`dock-row ${hover === r.id ? "hover" : ""}`} style={{ height: rowH }} onMouseEnter={() => setHover(r.id)}>
             <span style={{ position: "relative" }}>
               <RowLogo id={r.id} size={26} dim={r.paused} agent={agentOn(agents, r.id)} />
               {r.running > 0 && !agentOn(agents, r.id) && <span className="run-dot" />}
@@ -578,7 +623,7 @@ function Dock({ d, settings }: { d: DeskState; settings: Settings }) {
         <DeskButton page={settings.dock_button ?? "overview"} warn={settings.show_alerts ? warningLine(d.alerts, d.rows, settings) : null} />
       </div>
       {hovered && slid && (
-        <div style={{ marginTop: 10 + 46 + (hover ?? 0) * rowH - 10 }}>
+        <div ref={cardRef} style={{ marginTop: cardTop }}>
           <ProviderCard row={hovered} warnAt={settings.warn_at} canPause={d.caps.provider_controls} onChanged={d.refresh} />
         </div>
       )}
