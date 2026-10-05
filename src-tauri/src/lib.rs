@@ -342,16 +342,19 @@ fn play_alert_sound() {
 fn watch_fullscreen(app: AppHandle) {
     std::thread::spawn(move || {
         let mut hidden_by_us = false;
+        let mut seen = 0u8;
         loop {
             std::thread::sleep(std::time::Duration::from_secs(2));
             let Some(state) = app.try_state::<AppState>() else { continue };
             let settings = state.snapshot();
             let wants_widget = windows::widget_wanted(&settings, is_paired(&settings));
+            // Two polls in a row before hiding, so a momentary reading can't flicker the widget.
             let fullscreen = settings.hide_fullscreen && platform::fullscreen_active();
-            if wants_widget && fullscreen && !hidden_by_us {
+            seen = if fullscreen { seen.saturating_add(1) } else { 0 };
+            if wants_widget && seen >= 2 && !hidden_by_us {
                 windows::set_widget_visible(&app, false);
                 hidden_by_us = true;
-            } else if hidden_by_us && !fullscreen {
+            } else if hidden_by_us && seen == 0 {
                 windows::set_widget_visible(&app, wants_widget);
                 hidden_by_us = false;
             }
