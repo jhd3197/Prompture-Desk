@@ -1,5 +1,6 @@
 import {
-  currentMonitor, cursorPosition, getCurrentWindow, LogicalSize, PhysicalPosition, primaryMonitor,
+  availableMonitors, currentMonitor, cursorPosition, getCurrentWindow, LogicalSize, type Monitor, PhysicalPosition,
+  primaryMonitor,
 } from "@tauri-apps/api/window";
 import { ArrowUpRight, Check, Pause, Play, TriangleAlert } from "lucide-react";
 import { Component, Fragment, type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -361,6 +362,11 @@ function QueueLayer({ run }: { run: Automation }) {
 
 interface Size { w: number; h: number; railH: number }
 
+/** Stable identity for a monitor, so the dock can stay pinned to it. */
+function monitorKey(m: Monitor): string {
+  return `${m.position.x},${m.position.y},${m.size.width}x${m.size.height}`;
+}
+
 /** Keep the dock's transparent window exactly around it, pinned to its edge.
  *  Tucked, the window shrinks to the edge tab. */
 function useDockPlacement(
@@ -372,6 +378,12 @@ function useDockPlacement(
   const placedAt = useRef(0);
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
+  // The monitor the dock belongs to. `currentMonitor()` follows the window's
+  // position, and the window's position comes from place() — so once the
+  // transparent margin overlaps a screen boundary, the reading can flip and
+  // place() would pin the dock to the other screen. The pin breaks that loop;
+  // only a real user drag (handled in Dock) moves the dock between monitors.
+  const pin = useRef<string | null>(null);
 
   const place = useCallback(async () => {
     const wrap = wrapRef.current;
@@ -383,8 +395,13 @@ function useDockPlacement(
       ? { w: TAB_W, h: railH, railH }
       : { w: wrap.offsetWidth + PAD * 2, h: wrap.offsetHeight + PAD * 2, railH };
     const win = getCurrentWindow();
-    const mon = (await currentMonitor()) ?? (await primaryMonitor());
+    let mon: Monitor | null = null;
+    if (pin.current) {
+      mon = (await availableMonitors()).find(m => monitorKey(m) === pin.current) ?? null;
+    }
+    mon ??= (await currentMonitor()) ?? (await primaryMonitor());
     if (!mon) return;
+    pin.current = monitorKey(mon);
     const sf = mon.scaleFactor;
     const wa = mon.workArea;
     placedAt.current = Date.now();
@@ -421,7 +438,7 @@ function useDockPlacement(
     return () => { unlisten.then(fn => fn()); };
   }, [place]);
 
-  return { placedAt, place };
+  return { placedAt, place, pin };
 }
 
 function ProviderCard({
@@ -504,7 +521,7 @@ function Dock({ d, settings }: { d: DeskState; settings: Settings }) {
   const reveal = settings.visibility !== "hover" || intent.hovered;
   const tuckedRef = useRef(!reveal);
   const [slid, setSlid] = useState(reveal); // the dock is at its resting place
-  const { placedAt, place } = useDockPlacement(settings, wrapRef, railRef, tuckedRef);
+  const { placedAt, place, pin } = useDockPlacement(settings, wrapRef, railRef, tuckedRef);
   useEffect(() => {
     let cancelled = false;
     if (reveal) {
@@ -528,6 +545,8 @@ function Dock({ d, settings }: { d: DeskState; settings: Settings }) {
         const win = getCurrentWindow();
         const [pos, size, mon] = [await win.outerPosition(), await win.outerSize(), await currentMonitor()];
         if (!mon || !railRef.current) return;
+        // A real drag: the dock now belongs to the monitor it was dragged to.
+        pin.current = monitorKey(mon);
         const wa = mon.workArea;
         const centre = pos.x + size.width / 2;
         const edge = centre < wa.position.x + wa.size.width / 2 ? "left" : "right";
