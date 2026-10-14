@@ -354,10 +354,13 @@ fn watch_fullscreen(app: AppHandle) {
             if wants_widget && seen >= 2 && !hidden_by_us {
                 windows::set_widget_visible(&app, false);
                 hidden_by_us = true;
-            } else if hidden_by_us && seen == 0 {
-                windows::set_widget_visible(&app, wants_widget);
+            } else if hidden_by_us && seen == 0 && wants_widget {
+                windows::set_widget_visible(&app, true);
                 hidden_by_us = false;
             }
+            // If we hid the widget but it reads as unwanted (a transient keychain
+            // error makes `is_paired` false), keep hidden_by_us so a later poll
+            // still brings it back.
         }
     });
 }

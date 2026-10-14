@@ -2,7 +2,7 @@ import {
   currentMonitor, cursorPosition, getCurrentWindow, LogicalSize, PhysicalPosition, primaryMonitor,
 } from "@tauri-apps/api/window";
 import { ArrowUpRight, Check, Pause, Play, TriangleAlert } from "lucide-react";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Component, Fragment, type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { Mark } from "./components/Mark";
 import { Strip, useAppearance } from "./components/ui";
@@ -645,4 +645,36 @@ function Widget() {
   );
 }
 
-ReactDOM.createRoot(document.getElementById("root")!).render(<Widget />);
+/** Remounts the widget after a render crash (with backoff) instead of leaving the transparent window blank. */
+class WidgetBoundary extends Component<{ children: ReactNode }, { hasError: boolean; retries: number }> {
+  state = { hasError: false, retries: 0 };
+  timer: number | undefined;
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(err: unknown) {
+    console.error("Widget render crashed, remounting:", err);
+    const delay = Math.min(1000 * 2 ** this.state.retries, 30_000);
+    this.timer = window.setTimeout(
+      () => this.setState(s => ({ hasError: false, retries: Math.min(s.retries + 1, 10) })),
+      delay,
+    );
+  }
+
+  componentWillUnmount() {
+    window.clearTimeout(this.timer);
+  }
+
+  render() {
+    if (this.state.hasError) return null;
+    return <Fragment key={this.state.retries}>{this.props.children}</Fragment>;
+  }
+}
+
+ReactDOM.createRoot(document.getElementById("root")!).render(
+  <WidgetBoundary>
+    <Widget />
+  </WidgetBoundary>,
+);
